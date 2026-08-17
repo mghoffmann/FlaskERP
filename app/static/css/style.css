@@ -1,0 +1,251 @@
+/*
+ * style.css — the entire Shopfloor ERP stylesheet.
+ * One file, no preprocessor, no utility-class framework: semantic elements
+ * (table, dialog, button) plus a small set of component classes (.card,
+ * .badge, .toast, .nav-*). Kept under ~400 lines per requirements/09-frontend.md.
+ */
+
+/* 1. Custom properties — the palette. Everything below reads these instead of
+   hard-coded colors, so the theme lives in one place. Clean neutral light
+   theme only — dark mode is an explicit scope cut. */
+:root {
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-border: #dde1e6;
+  --color-text: #1f2430;
+  --color-text-muted: #6b7280;
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-ok: #15803d;
+  --color-ok-bg: #dcfce7;
+  --color-warn: #b45309;
+  --color-warn-bg: #fef3c7;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fee2e2;
+  --color-info: #1e40af;
+  --color-info-bg: #dbeafe;
+  --radius: 8px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-modal: 0 20px 40px rgba(16, 24, 40, 0.25);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+}
+
+/* 2. Reset + base */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+h1, h2, h3 { line-height: 1.25; margin: 0 0 var(--space-3); }
+a { color: var(--color-accent); }
+
+/* Consistent focus ring everywhere, incl. custom components — shop-floor
+   kiosks are keyboard/scanner driven as often as touch. */
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.page { max-width: 1100px; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-6); }
+
+/* 3. Nav shell (injected into <header id="nav"> by js/app.js) */
+#nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 var(--space-4);
+  min-height: 56px;
+}
+
+.nav-brand { font-weight: 700; text-decoration: none; color: var(--color-text); white-space: nowrap; }
+.nav-links { display: flex; gap: var(--space-4); flex: 1; }
+.nav-link { color: var(--color-text-muted); text-decoration: none; padding: var(--space-2) 0; border-bottom: 2px solid transparent; }
+.nav-link:hover { color: var(--color-text); }
+.nav-link.-current { color: var(--color-text); border-bottom-color: var(--color-accent); font-weight: 600; }
+.nav-right { display: flex; align-items: center; gap: var(--space-3); white-space: nowrap; }
+.nav-user { color: var(--color-text-muted); font-size: 0.9em; }
+
+/* 4. Cards — dashboard tiles and detail-page sections */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.card > h2, .card > h3 { margin-top: 0; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); }
+
+/* 5. Buttons — 44px min height on primary actions (operators may be on a
+   touch screen on the shop floor; requirements/09-frontend.md). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.95em;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover { background: var(--color-bg); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-primary { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
+.btn-primary:hover { background: var(--color-accent-hover); }
+.btn-danger { background: var(--color-danger); border-color: var(--color-danger); color: #fff; }
+.btn-ghost { background: transparent; border-color: transparent; }
+
+/* 6. Tables — sticky header, row hover, numeric right-align, empty state */
+table { width: 100%; border-collapse: collapse; background: var(--color-surface); }
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface);
+  text-align: left;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid var(--color-border);
+  padding: var(--space-3);
+}
+
+tbody td { padding: var(--space-3); border-bottom: 1px solid var(--color-border); }
+tbody tr[data-href] { cursor: pointer; }
+tbody tr:hover { background: var(--color-bg); }
+
+/* Numeric columns: apply to both <th> and its <td>s. */
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Single full-width muted row standing in for "no rows match" — never an
+   empty <tbody> (requirements/09-frontend.md). */
+.empty-row td { text-align: center; color: var(--color-text-muted); padding: var(--space-5); }
+
+/* 7. Badges — one class family shared by every module's status pill */
+.badge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  font-size: 0.8em;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.badge.-draft { background: var(--color-border); color: var(--color-text-muted); }
+.badge.-released, .badge.-ordered, .badge.-confirmed { background: var(--color-info-bg); color: var(--color-info); }
+.badge.-completed, .badge.-received, .badge.-shipped { background: var(--color-ok-bg); color: var(--color-ok); }
+.badge.-canceled { background: var(--color-border); color: var(--color-text-muted); text-decoration: line-through; }
+.badge.-warn { background: var(--color-warn-bg); color: var(--color-warn); }
+.badge.-danger { background: var(--color-danger-bg); color: var(--color-danger); }
+
+/* 8. Forms — field layout, inline field errors, page-level banners */
+.field { margin-bottom: var(--space-4); display: flex; flex-direction: column; gap: var(--space-1); }
+.field label { font-weight: 600; font-size: 0.9em; }
+
+.field input,
+.field select,
+.field textarea {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.field textarea { min-height: 80px; resize: vertical; }
+
+/* Message under a single input, populated from a 400 response's field_errors. */
+.field-error { color: var(--color-danger); font-size: 0.85em; min-height: 1.2em; }
+
+/* Page/modal-level banner: a 409's message, or a 400 with no field match. */
+.banner { padding: var(--space-3) var(--space-4); border-radius: var(--radius); margin-bottom: var(--space-4); font-size: 0.9em; }
+.banner.-error { background: var(--color-danger-bg); color: var(--color-danger); }
+.banner.-ok { background: var(--color-ok-bg); color: var(--color-ok); }
+
+/* 9. Modal (<dialog>) — see js/modal.js for the JS half of this pattern */
+dialog.modal {
+  border: none;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-modal);
+  padding: 0;
+  width: min(480px, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+dialog.modal::backdrop { background: rgba(16, 24, 40, 0.45); }
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-title { margin: 0; font-size: 1.1em; }
+
+.modal-close {
+  min-height: 32px;
+  min-width: 32px;
+  border: none;
+  background: transparent;
+  font-size: 1.2em;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.modal-form, .modal-confirm { padding: var(--space-4); }
+.modal-message { margin-top: 0; }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
+
+/* 10. Toasts — top-right transient notifications (see js/app.js toast()) */
+.toast-container {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: 1000;
+}
+
+.toast {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  font-size: 0.9em;
+  color: #fff;
+  min-width: 220px;
+}
+
+.toast-ok { background: var(--color-ok); }
+.toast-error { background: var(--color-danger); }
+
+/* 11. Login page */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: var(--space-4); }
+.login-card { width: min(360px, 100%); }
+.login-card h1 { font-size: 1.3em; text-align: center; margin-bottom: var(--space-5); }
