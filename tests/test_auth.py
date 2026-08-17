@@ -20,7 +20,7 @@ from typing import Callable, NamedTuple, Optional, Union
 import pytest
 
 from app.extensions import db
-from conftest import make_user
+from conftest import make_part, make_user
 
 # ---------------------------------------------------------------------------
 # The protected-endpoint sweep
@@ -78,6 +78,18 @@ class Endpoint(NamedTuple):
 ENDPOINTS = [
     Endpoint("POST", "/api/auth/logout", None),
     Endpoint("GET", "/api/auth/me", None),
+    # --- app/api/inventory.py (03-inventory.md) ---
+    Endpoint("GET", "/api/parts", None),
+    Endpoint("POST", "/api/parts", "admin"),
+    Endpoint("GET", lambda seeded: f"/api/parts/{seeded.part.id}", None),
+    Endpoint("PUT", lambda seeded: f"/api/parts/{seeded.part.id}", "admin"),
+    Endpoint("DELETE", lambda seeded: f"/api/parts/{seeded.part.id}", "admin"),
+    Endpoint("POST", lambda seeded: f"/api/parts/{seeded.part.id}/activate", "admin"),
+    Endpoint("POST", lambda seeded: f"/api/parts/{seeded.part.id}/adjust", None),
+    Endpoint("GET", lambda seeded: f"/api/parts/{seeded.part.id}/movements", None),
+    # --- app/api/bom.py (04-bom.md) ---
+    Endpoint("GET", lambda seeded: f"/api/parts/{seeded.part.id}/bom", None),
+    Endpoint("PUT", lambda seeded: f"/api/parts/{seeded.part.id}/bom", "admin"),
 ]
 
 
@@ -85,13 +97,18 @@ ENDPOINTS = [
 def seeded():
     """Lazily-populated namespace for `Endpoint.path` callables that need ids.
 
-    Empty today because no listed endpoint needs a path param. A module
-    adding one (e.g. `PUT /api/parts/<id>`) should extend this fixture —
-    or add its own fixture that depends on it — to attach the object(s)
-    its lambda reads (`seeded.part`, `seeded.wo`, ...), built via the
-    `make_*` factories in conftest.py.
+    Attaches ``.part`` via ``make_part``: every inventory/BOM endpoint
+    above with a path param reads a part id, and one shared part covers
+    all of them — the ``require_login`` decorator (see app/api/auth.py)
+    short-circuits with 401/403 before any route body/type validation
+    runs, so the part's ``part_type``/status don't matter for this sweep.
+    A later module needing a *different* kind of seeded object (a work
+    order, a supplier, ...) should extend this same fixture rather than
+    duplicating it.
     """
-    return SimpleNamespace()
+    part = make_part()
+    db.session.commit()
+    return SimpleNamespace(part=part)
 
 
 def _resolve_path(endpoint, seeded):

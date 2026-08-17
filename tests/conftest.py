@@ -47,11 +47,13 @@ from app import create_app
 from app.extensions import db
 from app.models import (
     BomLine,
+    Customer,
     Part,
     POLine,
     PurchaseOrder,
     SalesOrder,
     SOLine,
+    Supplier,
     User,
     WorkOrder,
 )
@@ -276,6 +278,38 @@ def make_wo(product, qty, creator, status="draft", **overrides):
     wo.wo_number = f"WO-{wo.id:04d}"
     db.session.flush()
     return wo
+
+
+def make_supplier(**overrides):
+    """Create, flush, and return a :class:`~app.models.Supplier` with sensible defaults.
+
+    Mirrors :func:`make_part`'s override style. ``name`` is the table's
+    only UNIQUE column, so it gets an auto-generated default (reusing
+    ``_sku_counter`` rather than standing up a second counter just for
+    this) so tests never collide on ``suppliers.name`` just because they
+    didn't bother to pass one.
+    """
+    defaults = {"name": f"Test Supplier {next(_sku_counter):04d}"}
+    defaults.update(overrides)
+    supplier = Supplier(**defaults)
+    db.session.add(supplier)
+    db.session.flush()
+    return supplier
+
+
+def make_customer(**overrides):
+    """Create, flush, and return a :class:`~app.models.Customer` with sensible defaults.
+
+    See :func:`make_supplier` immediately above — ``Customer`` is
+    structurally identical (01-database.md), so the same reasoning
+    applies here for the auto-generated ``name``.
+    """
+    defaults = {"name": f"Test Customer {next(_sku_counter):04d}"}
+    defaults.update(overrides)
+    customer = Customer(**defaults)
+    db.session.add(customer)
+    db.session.flush()
+    return customer
 
 
 def make_po(supplier, creator, lines=None, status="draft", **overrides):
