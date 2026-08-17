@@ -1,0 +1,72 @@
+# docker-compose.yml — DEV environment only.
+#
+# Goal (requirements/11-deployment.md): a reviewer runs the whole system with
+# one command. Bring-up sequence:
+#   cp .env.example .env
+#   docker compose up
+#   docker compose exec app flask seed
+#   -> http://localhost:8000, login as admin
+#
+# Production has its own file, docker-compose.prod.yml (a later phase), which
+# drops the published DB port, drops the bind mount, and uses the Dockerfile's
+# gunicorn entrypoint unmodified instead of the `command:` override below.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      # Single demo user/db/password, all literally "erp" — fine for local
+      # dev where the whole stack lives on localhost; prod overrides these
+      # with real secrets via its own .env.
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp
+      POSTGRES_DB: erp
+    volumes:
+      # Named volume so data survives `docker compose down` / container
+      # recreation — required by the acceptance criterion that killing and
+      # restarting a container loses no data.
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Published to localhost so `psql`/pytest on the host machine can reach
+      # the dev database directly, outside the `app` container.
+      - "5432:5432"
+    healthcheck:
+      # pg_isready confirms Postgres is actually accepting connections, not
+      # just that the container process has started. `app`'s `depends_on`
+      # below gates on this healthcheck (condition: service_healthy) rather
+      # than plain container-start, so migrations never race a still-booting
+      # database.
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      # Real values (DATABASE_URL, SECRET_KEY, etc.) come from the gitignored
+      # .env; see .env.example for the documented template.
+      - .env
+    depends_on:
+      db:
+        # Wait for Postgres's healthcheck (not just "container started")
+        # before starting `app` — entrypoint.sh's own retry loop is a second,
+        # belt-and-suspenders layer of the same protection.
+        condition: service_healthy
+    volumes:
+      # Bind-mount the source over the image's baked-in copy so edits on the
+      # host are picked up immediately by Flask's --debug reloader below,
+      # without rebuilding the image on every change.
+      - ./:/app
+    command: ["flask", "run", "--debug", "--host", "0.0.0.0", "--port", "8000"]
+    # ^ Dev-only override of the Dockerfile's ENTRYPOINT behavior. The image's
+    # entrypoint.sh (migrations + gunicorn) is built for prod: gunicorn has no
+    # live-reload and isn't meant to restart on every save. Compose's
+    # `command:` here does NOT replace entrypoint.sh — it replaces the CMD
+    # entrypoint.sh would otherwise exec into, so entrypoint.sh still runs
+    # first (db-wait + `flask db upgrade`) before this dev server starts.
+
+volumes:
+  pgdata:

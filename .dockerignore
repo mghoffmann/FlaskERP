@@ -1,0 +1,33 @@
+# .dockerignore — keeps the build context (and thus image layers/cache) lean.
+# Anything listed here is never sent to the Docker daemon during `docker build`,
+# so it can't bloat the image or accidentally invalidate the pip-install cache
+# layer in the Dockerfile when it changes.
+
+# Python virtualenv — never needed inside the image; dependencies come from
+# requirements.txt via pip, not a copied venv.
+.venv/
+venv/
+
+# Version control metadata — irrelevant at runtime, and can be large.
+.git/
+.gitignore
+
+# Python bytecode caches — regenerated at runtime, no reason to ship them.
+__pycache__/
+*.pyc
+*.pyo
+
+# Local secrets — .env holds real credentials for this machine; the image
+# gets its config from docker-compose's `env_file:`/`environment:` instead.
+# Shipping .env into an image would bake secrets into a layer permanently.
+.env
+
+# tokensave code-graph cache — dev tooling only, not part of the app.
+.tokensave/
+
+# Requirement docs — planning artifacts for the build session, not app code.
+requirements/
+
+# Tests — not needed to run the app in a container; CI runs them outside the
+# image build, and excluding them keeps the image smaller.
+tests/
