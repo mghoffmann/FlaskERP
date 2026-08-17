@@ -1,0 +1,59 @@
+<!--
+  parts.html — the parts catalog list. Static markup only: js/parts.js fills the
+  table and wires the toolbar after initShell() confirms a session. See
+  requirements/03-inventory.md "Pages > /parts.html".
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Parts</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <div class="page-header">
+        <h1>Parts</h1>
+        <!-- data-role="admin": app.js's initShell() removes this for operators
+             (UX only — POST /api/parts is admin-only on the server too). -->
+        <button type="button" id="new-part-btn" class="btn btn-primary" data-role="admin">New part</button>
+      </div>
+
+      <div class="toolbar">
+        <input
+          id="search-input"
+          type="search"
+          class="toolbar-input"
+          placeholder="Search SKU or name…"
+          aria-label="Search parts"
+        />
+        <select id="type-filter" class="toolbar-select" aria-label="Part type">
+          <option value="">All types</option>
+          <option value="raw">Raw</option>
+          <option value="finished">Finished</option>
+        </select>
+        <label class="toolbar-check">
+          <input id="low-stock-filter" type="checkbox" />
+          Low stock only
+        </label>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th class="num">On hand</th>
+            <th class="num">Reorder point</th>
+            <th class="num">Unit cost</th>
+          </tr>
+        </thead>
+        <tbody id="parts-tbody"></tbody>
+      </table>
+    </main>
+    <script type="module" src="/js/parts.js"></script>
+  </body>
+</html>

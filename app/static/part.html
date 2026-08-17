@@ -1,0 +1,84 @@
+<!--
+  part.html — part detail page: header, stock card, BOM section (finished
+  parts only), movements ledger. Static shell only: js/part.js reads ?id= and
+  fills everything in. See requirements/03-inventory.md and 04-bom.md.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Part detail</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <!-- Shown instead of #part-content when GET /api/parts/{id} 404s, per
+           requirements/09-frontend.md's "unknown id shows a Not found banner,
+           not a blank page" rule. -->
+      <div id="not-found-banner" class="banner -error" hidden>Part not found.</div>
+
+      <div id="part-content" hidden>
+        <div class="page-header">
+          <div>
+            <h1 id="part-title"></h1>
+            <div id="part-badges" class="badge-row"></div>
+          </div>
+          <div class="page-header-actions" data-role="admin">
+            <button type="button" id="edit-part-btn" class="btn">Edit</button>
+            <button type="button" id="toggle-active-btn" class="btn btn-danger">Deactivate</button>
+          </div>
+        </div>
+
+        <!-- Page-level banner for the 409 conflict deactivation can return
+             (part referenced by an open document) — requirements/03-inventory.md. -->
+        <div id="conflict-banner" class="banner -error" hidden></div>
+
+        <section class="card stock-card">
+          <h2>Stock</h2>
+          <div class="stock-card-body">
+            <div class="stock-qty">
+              <span id="stock-qty-value" class="stock-qty-value"></span>
+              <span id="stock-qty-unit" class="stock-qty-unit"></span>
+            </div>
+            <dl class="stock-meta">
+              <div><dt>Reorder point</dt><dd id="stock-reorder"></dd></div>
+            </dl>
+            <span id="low-stock-warning" class="badge -warn" hidden>Low stock</span>
+            <button type="button" id="adjust-stock-btn" class="btn btn-primary">Adjust stock</button>
+          </div>
+        </section>
+
+        <!-- Only shown for finished parts — see 04-bom.md. -->
+        <section id="bom-section" class="card" hidden>
+          <div class="card-header-row">
+            <h2>Bill of Materials</h2>
+            <button type="button" id="edit-bom-btn" class="btn" data-role="admin">Edit BOM</button>
+          </div>
+          <p class="hint-text">Changes affect unfinished work orders: work orders read the BOM when they complete, not when they're created.</p>
+          <div id="bom-content"></div>
+        </section>
+
+        <section class="card">
+          <h2>Movements</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th class="num">Qty</th>
+                <th>Reason</th>
+                <th>Reference</th>
+                <th>Note</th>
+                <th>User</th>
+              </tr>
+            </thead>
+            <tbody id="movements-tbody"></tbody>
+          </table>
+          <button type="button" id="load-more-btn" class="btn" hidden>Load more</button>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/js/part.js"></script>
+  </body>
+</html>

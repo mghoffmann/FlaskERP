@@ -249,3 +249,61 @@ dialog.modal::backdrop { background: rgba(16, 24, 40, 0.45); }
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: var(--space-4); }
 .login-card { width: min(360px, 100%); }
 .login-card h1 { font-size: 1.3em; text-align: center; margin-bottom: var(--space-5); }
+
+/* 12. Parts catalog + part detail (parts.html / part.html) — added for the
+   parts-catalog task; kept in the same "style semantic elements + a handful
+   of component classes" spirit as the rest of the file. */
+
+/* Page title row shared by both pages: heading + right-aligned actions. */
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.page-header h1 { margin-bottom: var(--space-1); }
+.page-header-actions { display: flex; gap: var(--space-2); }
+.badge-row { display: flex; gap: var(--space-2); }
+
+/* Generic (non-status) pill, e.g. the part-type badge on part.html. */
+.badge.-info { background: var(--color-info-bg); color: var(--color-info); }
+
+/* List-page toolbar: search + filters, wraps on narrow screens. */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.toolbar-input, .toolbar-select {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.toolbar-input { flex: 1 1 220px; }
+.toolbar-check { display: flex; align-items: center; gap: var(--space-2); font-size: 0.9em; cursor: pointer; }
+
+/* Card section header row (e.g. the BOM section's "Edit BOM" button). */
+.card-header-row { display: flex; align-items: center; justify-content: space-between; }
+.hint-text { color: var(--color-text-muted); font-size: 0.85em; margin: 0 0 var(--space-3); }
+
+/* Stock card: big current-quantity readout + meta + the Adjust button. */
+.stock-card-body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); }
+.stock-qty { display: flex; align-items: baseline; gap: var(--space-2); }
+.stock-qty-value { font-size: 2.2em; font-weight: 700; line-height: 1; }
+.stock-qty-unit { color: var(--color-text-muted); }
+.stock-meta { margin: 0; }
+.stock-meta div { display: flex; gap: var(--space-2); }
+.stock-meta dt { color: var(--color-text-muted); font-size: 0.9em; }
+.stock-meta dd { margin: 0; }
+
+/* Movements ledger: color-coded qty_delta. */
+.num.-pos { color: var(--color-ok); }
+.num.-neg { color: var(--color-danger); }
+
+/* BOM read-view warning icon (inactive or zero-stock component). */
+.warn-icon { color: var(--color-warn); }
+
+/* Inputs inside editable table rows (the BOM line-item editor). */
+td input[type="text"], td input[type="number"] {
+  width: 100%;
+  min-height: 36px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font: inherit;
+}
