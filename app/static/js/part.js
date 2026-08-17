@@ -128,12 +128,21 @@ function main(user) {
       : el("span", { class: "badge -canceled" }, ["Inactive"]);
     partBadgesEl.replaceChildren(typeBadge, activeBadge);
 
-    toggleActiveBtn.textContent = part.active ? "Deactivate" : "Activate";
-    toggleActiveBtn.classList.toggle("btn-danger", part.active);
+    // Null-guarded: this button lives inside the header's
+    // data-role="admin" container, which initShell() REMOVES from the DOM
+    // (not just hides) for operators before this module's main() runs —
+    // so for an operator session these element refs are null, and an
+    // unguarded property access here would throw and abort the whole
+    // page render (operators still need the stock card and movements).
+    if (toggleActiveBtn) {
+      toggleActiveBtn.textContent = part.active ? "Deactivate" : "Activate";
+      toggleActiveBtn.classList.toggle("btn-danger", part.active);
+    }
   }
 
-  editPartBtn.addEventListener("click", openEditPartModal);
-  toggleActiveBtn.addEventListener("click", onToggleActive);
+  // Same role-gating guard as above: these buttons don't exist for operators.
+  if (editPartBtn) editPartBtn.addEventListener("click", openEditPartModal);
+  if (toggleActiveBtn) toggleActiveBtn.addEventListener("click", onToggleActive);
 
   async function openEditPartModal() {
     const p = currentPart;
@@ -303,7 +312,11 @@ function main(user) {
     bomContent.replaceChildren(table);
   }
 
-  editBomBtn.addEventListener("click", enterBomEditMode);
+  // Role-gating guard (see renderHeader): "Edit BOM" is admin-only and
+  // removed from the DOM for operators. The `editBomBtn.disabled` writes
+  // inside enterBomEditMode() need no guard — they're only reachable
+  // through this click listener, which never attaches without the button.
+  if (editBomBtn) editBomBtn.addEventListener("click", enterBomEditMode);
 
   async function enterBomEditMode() {
     editBomBtn.disabled = true;
