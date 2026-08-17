@@ -191,14 +191,16 @@ def create_app(config_name=None):
     from app.api.inventory import bp as inventory_bp
     from app.api.bom import bp as bom_bp
     from app.api.work_orders import bp as work_orders_bp
+    from app.api.purchasing import bp as purchasing_bp
+    from app.api.sales_orders import bp as sales_orders_bp
 
     blueprints = [
         auth_bp,
         inventory_bp,
         bom_bp,
         work_orders_bp,
-        # app.api.purchasing.bp,
-        # app.api.sales_orders.bp,
+        purchasing_bp,
+        sales_orders_bp,
         # app.api.dashboard.bp,
     ]
     for bp in blueprints:
