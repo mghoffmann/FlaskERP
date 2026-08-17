@@ -337,16 +337,24 @@ def _seed_purchase_orders(parts_by_sku, suppliers, admin, now):
     orders, each PO is flushed and numbered individually so two rows
     never share the ``UNIQUE`` ``po_number`` placeholder at once.
     """
+    # The in-transit PO restocks RAW-BEARING-608 deliberately: it's seeded
+    # below its reorder point (so the dashboard's low-stock report flags
+    # it), and the seeded *released* work order (5x FIN-CONVEYOR-S) needs
+    # 40 bearings against 28 on hand. Receiving this PO is what makes that
+    # WO completable — giving the demo its natural walkthrough: low-stock
+    # report -> receive the delivery -> complete the build -> ship. The
+    # runbook's "complete the seeded released work order" step depends on
+    # this chain.
     ordered_po = PurchaseOrder(
         po_number="pending",
         supplier_id=suppliers[0].id,
         status="ordered",
-        notes="Restocking bar stock.",
+        notes="Restocking 608 bearings (below reorder point).",
         created_by=admin.id,
         ordered_at=now - timedelta(days=2),
     )
     ordered_po.lines.append(
-        POLine(part_id=parts_by_sku["RAW-STEEL-BAR"].id, qty=100, unit_cost=12.00)
+        POLine(part_id=parts_by_sku["RAW-BEARING-608"].id, qty=200, unit_cost=1.20)
     )
     db.session.add(ordered_po)
     db.session.flush()
