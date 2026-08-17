@@ -28,6 +28,7 @@ import os
 
 from flask import Flask, redirect
 
+from app.cli import register_cli
 from app.config import DevelopmentConfig, config
 from app.errors import ApiError, handle_api_error
 from app.extensions import db, migrate
@@ -125,6 +126,11 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
 
     register_error_handlers(app)
+
+    # `flask seed` (app/cli.py) — registered here, not decorated directly
+    # in this factory, so the command's implementation lives with the
+    # rest of app/cli.py instead of growing create_app().
+    register_cli(app)
 
     @app.teardown_request
     def teardown_db_session(exception=None):
