@@ -1,0 +1,112 @@
+# docker-compose.prod.yml — PRODUCTION environment (Digital Ocean droplet).
+#
+# Companion to docker-compose.yml (dev). Same two application services (db,
+# app) plus a third — caddy — that terminates TLS and reverse-proxies to app.
+# See requirements/11-deployment.md for the full spec and the README's
+# "Deployment" section for the droplet runbook that brings this file up.
+#
+# Usage on the droplet:
+#   cp .env.example .env   # then fill in real secrets — see README
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml exec app flask seed
+#
+# Verify this file before deploying:
+#   docker compose -f docker-compose.prod.yml config
+# should show no published host port for `db` and no debug settings anywhere.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      # Same variable names as dev, but real values come from the droplet's
+      # .env (strong POSTGRES_PASSWORD) — never the literal "erp" dev
+      # defaults. env_file below supplies these.
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Distinct named volume from dev's `pgdata` (this compose file has its
+      # own top-level `volumes:` block below) — running dev and prod on the
+      # same host, or against the same Docker context, can never cross-write
+      # each other's data even by accident.
+      - pgdata_prod:/var/lib/postgresql/data
+    # DEV DIFFERENCE: no `ports:` mapping here. Dev publishes 5432:5432 so a
+    # developer's host `psql`/pytest can reach it directly; prod deliberately
+    # does NOT — `db` is reachable only from other containers on this
+    # compose's private network (by service name, `db`), never from the
+    # public internet or even the droplet's own host network. This is what
+    # requirements/11-deployment.md's acceptance criterion ("no published DB
+    # port") checks for.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    # Built on the droplet from the same Dockerfile as dev — no separate
+    # prod Dockerfile to keep in sync.
+    build: .
+    env_file:
+      # Real SECRET_KEY, DATABASE_URL (pointing at the `db` service, not
+      # localhost), strong POSTGRES_PASSWORD, and strong seed passwords —
+      # see .env.example and the README's Deployment section for the full
+      # variable list.
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    # DEV DIFFERENCE: no `volumes:` bind mount and no `command:` override.
+    # Dev bind-mounts the source (`./:/app`) so edits appear without a
+    # rebuild, and overrides the container command to run `flask run
+    # --debug` for live reload. Prod runs the image exactly as it was built
+    # — the code inside the container is what got tested and committed, not
+    # whatever happens to be on the host filesystem at the moment — and lets
+    # the Dockerfile's own ENTRYPOINT/CMD run unmodified: entrypoint.sh waits
+    # for the db, runs `flask db upgrade`, then execs gunicorn
+    # (`-w 2 -b 0.0.0.0:8000`). No Flask debugger, no auto-reload, no
+    # interactive-debugger-as-a-code-execution-hole in production.
+    #
+    # DEV DIFFERENCE: no published `ports:` here either. Only Caddy (below)
+    # is reachable from outside the droplet; `app` is reachable from Caddy
+    # over the compose network at `app:8000`, the same way `db` is reachable
+    # at `db:5432` — nothing about the app server is ever bound to a host
+    # port an attacker could hit directly, bypassing TLS.
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      # The only two ports this compose file publishes to the host/internet.
+      # Caddy listens on 80 for the ACME HTTP-01 challenge (and to redirect
+      # plain HTTP to HTTPS) and on 443 for the actual TLS traffic it then
+      # reverse-proxies to app:8000 over the private compose network.
+      - "80:80"
+      - "443:443"
+    volumes:
+      # The two-line reverse-proxy config (see ./Caddyfile) — read-only bind
+      # mount since Caddy only ever reads it.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Named volumes (not bind mounts) for Caddy's own state: obtained
+      # Let's Encrypt certificates/keys (caddy_data) and its config cache
+      # (caddy_config). Naming them lets them survive `docker compose down`
+      # / container recreation, so a redeploy doesn't re-request a
+      # certificate from Let's Encrypt every time (which is rate-limited).
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      # Substituted into {$DOMAIN} in ./Caddyfile. Set in the droplet's
+      # .env to the real hostname (e.g. erp.yourdomain.com); see the README
+      # for the no-domain HTTP-only fallback, which comments out the
+      # {$DOMAIN} line in the Caddyfile instead of changing this service.
+      - DOMAIN=${DOMAIN}
+    restart: unless-stopped
+
+volumes:
+  # Named `pgdata_prod` (not `pgdata`) specifically so this file's volume
+  # never collides with docker-compose.yml's dev `pgdata`, even if both
+  # were ever brought up against the same Docker daemon.
+  pgdata_prod:
+  caddy_data:
+  caddy_config:

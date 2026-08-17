@@ -1,0 +1,29 @@
+# Caddyfile — reverse proxy + automatic HTTPS for Shopfloor ERP (prod only).
+#
+# Used by the `caddy` service in docker-compose.prod.yml. Caddy v2 gets TLS
+# "for free": when a Caddyfile's site address is a real domain name (not an
+# IP or `localhost`), Caddy automatically requests and renews a Let's
+# Encrypt certificate for it via the ACME HTTP-01 challenge on port 80, then
+# serves HTTPS on 443 — no manual certbot, no cert files to manage, no TLS
+# config to write. It just needs the domain's DNS A record already pointed
+# at this droplet's IP (see the README's Deployment runbook, step 2) so
+# Let's Encrypt's validation request can reach this container.
+#
+# {$DOMAIN} is a Caddyfile env-var substitution: it reads the DOMAIN
+# variable that docker-compose.prod.yml passes into the caddy service's
+# environment (itself sourced from the droplet's .env).
+
+{$DOMAIN}
+reverse_proxy app:8000
+
+# --- No-domain fallback (documented in requirements/11-deployment.md) ------
+# If you don't have a domain to point at the droplet yet, comment out the
+# two lines above and uncomment the block below instead: it serves plain
+# HTTP on port 80 at the droplet's bare IP, with no certificate involved.
+# Acceptable for a short-lived demo; prefer the domain above when you can —
+# automatic HTTPS on a demo built in a few hours is a strong signal in
+# itself.
+#
+# http:// {
+#     reverse_proxy app:8000
+# }
