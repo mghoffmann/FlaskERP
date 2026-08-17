@@ -37,7 +37,7 @@ def cmd_up(repo_root: Path) -> int:
     """`docker compose up -d db`, then poll pg_isready inside the container until ready."""
     up = run(["docker", "compose", "up", "-d", "db"], cwd=repo_root)
     if up.returncode != 0:
-        print("db timeout")
+        print("db up failed")
         sys.stderr.write(up.stderr)
         return 1
 
@@ -57,10 +57,20 @@ def cmd_up(repo_root: Path) -> int:
 
 
 def cmd_reset_test(repo_root: Path) -> int:
-    """Drop and recreate an empty erp_test database (two statements, pg16 DROP...WITH (FORCE))."""
-    sql = "DROP DATABASE IF EXISTS erp_test WITH (FORCE); CREATE DATABASE erp_test;"
+    """Drop and recreate an empty erp_test database.
+
+    Uses two separate ``-c`` flags: psql runs each -c in its own implicit
+    transaction (autocommit), which matters because DROP/CREATE DATABASE
+    refuse to run inside a transaction block — a single "-c" containing
+    both statements would fail.
+    """
     result = run(
-        ["docker", "compose", "exec", "-T", "db", "psql", "-U", "erp", "-d", "erp", "-c", sql],
+        [
+            "docker", "compose", "exec", "-T", "db", "psql",
+            "-U", "erp", "-d", "erp", "-v", "ON_ERROR_STOP=1",
+            "-c", "DROP DATABASE IF EXISTS erp_test WITH (FORCE);",
+            "-c", "CREATE DATABASE erp_test;",
+        ],
         cwd=repo_root,
     )
     if result.returncode != 0:
