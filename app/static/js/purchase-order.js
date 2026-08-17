@@ -77,7 +77,7 @@ function main(user) {
    * three modes (create/view/edit) is on screen is never tracked separately
    * from this: it's create while `currentPo` is null, edit while the edit
    * section is un-hidden and `currentPo` is set, view otherwise — each
-   * render*/enter*/exit* function below already knows which case it's in
+   * render* enter* exit* function below already knows which case it's in
    * from its own call site, so a parallel `mode` variable would just be
    * another thing to keep in sync. */
   let currentPo = null;
