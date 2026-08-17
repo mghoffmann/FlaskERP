@@ -1,0 +1,63 @@
+<!--
+  sales-orders.html — the sales order list. Static markup only:
+  js/sales-orders.js fetches the list once, renders the status tabs +
+  counts, and filters the table (by status tab and customer dropdown)
+  client-side. See requirements/07-sales-orders.md "Pages > /sales-orders.html".
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Sales Orders</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <div class="page-header">
+        <h1>Sales Orders</h1>
+        <!-- data-role="admin": app.js's initShell() removes this for operators
+             (UX only — POST /api/sales-orders is admin-only on the server too). -->
+        <button type="button" id="new-so-btn" class="btn btn-primary" data-role="admin">New sales order</button>
+      </div>
+
+      <!-- Status filter tabs, built from a single fetch of GET /api/sales-orders
+           (no status/customer_id params) so counts and filtering are both
+           client-side, mirroring the purchase-orders.html pattern. The current
+           tab + customer round-trip through the query string (setQs) so
+           ?status=confirmed&customer_id=3 is a linkable/bookmarkable view. -->
+      <nav class="tabs" id="status-tabs" aria-label="Filter by status">
+        <button type="button" class="tab" data-status="">All <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="draft">Draft <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="confirmed">Confirmed <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="shipped">Shipped <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="canceled">Canceled <span class="tab-count"></span></button>
+      </nav>
+
+      <div class="toolbar">
+        <select id="customer-filter" class="toolbar-select" aria-label="Customer">
+          <option value="">All customers</option>
+        </select>
+        <!-- Reciprocal to customers.html's "Sales orders →" link. -->
+        <a href="/customers.html" class="btn btn-ghost">Customers →</a>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>SO #</th>
+            <th>Customer</th>
+            <th class="num">Lines</th>
+            <th class="num">Total</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Shipped</th>
+          </tr>
+        </thead>
+        <tbody id="so-tbody"></tbody>
+      </table>
+    </main>
+    <script type="module" src="/js/sales-orders.js"></script>
+  </body>
+</html>

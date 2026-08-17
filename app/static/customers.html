@@ -1,0 +1,61 @@
+<!--
+  customers.html — the customer directory. Static markup only: js/customers.js
+  fills the table and wires the toolbar/modals after initShell() confirms a
+  session. See requirements/07-sales-orders.md "Pages > /customers.html",
+  which mirrors 06-purchasing.md's /suppliers.html pattern exactly.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Customers</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <div class="page-header">
+        <h1>Customers</h1>
+        <!-- data-role="admin": app.js's initShell() removes this for operators
+             (UX only — POST /api/customers is admin-only on the server too). -->
+        <button type="button" id="new-customer-btn" class="btn btn-primary" data-role="admin">New customer</button>
+      </div>
+
+      <!-- Page-level banner for the 409 conflict Deactivate can return (the
+           customer has a draft/confirmed SO) — requirements/07-sales-orders.md.
+           The confirm flow for Deactivate/Activate happens after the detail
+           modal has already closed, so this lives at the page level rather
+           than inside the modal (see js/customers.js). -->
+      <div id="page-banner" class="banner -error" hidden></div>
+
+      <div class="toolbar">
+        <input
+          id="search-input"
+          type="search"
+          class="toolbar-input"
+          placeholder="Search name…"
+          aria-label="Search customers"
+        />
+        <!-- Reciprocal to sales-orders.html's "Customers →" link — 09-frontend.md
+             reaches suppliers/customers only via secondary links on their
+             related list pages' toolbars, not the main nav. -->
+        <a href="/sales-orders.html" class="btn btn-ghost">Sales orders →</a>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Contact</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="customers-tbody"></tbody>
+      </table>
+    </main>
+    <script type="module" src="/js/customers.js"></script>
+  </body>
+</html>

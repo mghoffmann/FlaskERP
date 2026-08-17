@@ -1,0 +1,97 @@
+<!--
+  sales-order.html — one page, three modes (create / view / edit) per
+  requirements/07-sales-orders.md "Pages > /sales-order.html?id={id}", which
+  mirrors purchase-order.html's structure with the part picker limited to
+  active finished parts, a unit_price column instead of unit_cost, and a
+  per-line stock-availability view (On hand / Short) plus a ship-readiness
+  banner once confirmed. Static shell only: js/sales-order.js reads ?id=
+  (absent = create mode) and fills/builds everything in.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Sales order</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <!-- Shown instead of #so-content when GET /api/sales-orders/{id}
+           404s or ?id= is present but non-numeric, per requirements/09-frontend.md's
+           "unknown id shows a Not found banner, not a blank page" rule. -->
+      <div id="not-found-banner" class="banner -error" hidden>Sales order not found.</div>
+
+      <div id="so-content">
+        <div class="page-header">
+          <div>
+            <h1 id="so-title"></h1>
+            <div id="so-badges" class="badge-row"></div>
+          </div>
+          <div id="so-actions" class="page-header-actions"></div>
+        </div>
+
+        <!-- Page-level banner for 400/409 responses from save/confirm/cancel/
+             ship (e.g. "Cannot confirm: SO is not draft", insufficient_stock
+             message). Shared by both view-mode actions and the create/edit form. -->
+        <div id="so-banner" class="banner -error" hidden></div>
+
+        <!-- Ship-readiness banner: green "Ready to ship" / amber "Short N
+             lines" while confirmed; hidden for draft/shipped/canceled (the
+             lines table's On hand/Short columns are informational enough at
+             draft, per the same reasoning work-order.html uses). -->
+        <div id="availability-banner" class="banner" hidden></div>
+
+        <!-- View mode: header details + read-only lines table. Hidden in
+             create/edit mode. -->
+        <section id="so-view-section" class="card" hidden>
+          <h2>Details</h2>
+          <dl class="wo-meta">
+            <div><dt>Customer</dt><dd id="so-customer"></dd></div>
+            <div><dt>Notes</dt><dd id="so-notes"></dd></div>
+            <div><dt>Created by</dt><dd id="so-created-by"></dd></div>
+            <div><dt>Created</dt><dd id="so-created-at"></dd></div>
+            <div><dt>Confirmed</dt><dd id="so-confirmed-at"></dd></div>
+            <div><dt>Shipped</dt><dd id="so-shipped-at"></dd></div>
+          </dl>
+        </section>
+
+        <section id="so-view-lines-section" class="card" hidden>
+          <h2>Lines</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Part</th>
+                <th class="num">Qty</th>
+                <th class="num">Unit price</th>
+                <th class="num">Line total</th>
+                <th class="num">On hand</th>
+                <th class="num">Short</th>
+              </tr>
+            </thead>
+            <tbody id="so-lines-tbody"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3">Total</td>
+                <td class="num" id="so-lines-total"></td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+
+        <!-- Create/edit mode: customer picker, notes, editable lines grid.
+             Built entirely by JS (js/sales-order.js's renderEditForm()) into
+             #so-edit-container, same pattern as purchase-order.js's
+             renderEditForm() — the field/row shapes differ enough between
+             create and edit (and from the read-only view above) that a
+             fully static form here would mostly go unused. -->
+        <section id="so-edit-section" class="card" hidden>
+          <div id="so-edit-container"></div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/js/sales-order.js"></script>
+  </body>
+</html>
