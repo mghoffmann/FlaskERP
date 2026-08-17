@@ -174,9 +174,23 @@ def create_app(config_name=None):
     # define a `bp` Blueprint; later phases append it to this list as
     # that module is built. Registering from a list (instead of N
     # separate app.register_blueprint(...) calls) keeps that growth to
-    # one line per module.
+    # one line per module. The import happens here, inside the factory,
+    # rather than at module level: app.api.auth imports app.models (for
+    # `User`), and importing every API module is also what guarantees
+    # SQLAlchemy's metadata is fully populated by the time `flask db
+    # migrate`/`db.create_all()` run, without app/__init__.py having to
+    # import app.models itself.
+    #
+    # NOTE: imported as `from app.api.auth import bp as auth_bp`, not
+    # `import app.api.auth` — the latter binds the local name `app`
+    # (already bound a few lines up to this function's `Flask` instance)
+    # to the top-level `app` *package* instead, silently shadowing it and
+    # breaking every `app.register_blueprint(...)`/`app.route(...)` call
+    # below for the rest of this function.
+    from app.api.auth import bp as auth_bp
+
     blueprints = [
-        # app.api.auth.bp,
+        auth_bp,
         # app.api.inventory.bp,
         # app.api.bom.bp,
         # app.api.work_orders.bp,
