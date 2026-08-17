@@ -188,11 +188,13 @@ def create_app(config_name=None):
     # breaking every `app.register_blueprint(...)`/`app.route(...)` call
     # below for the rest of this function.
     from app.api.auth import bp as auth_bp
+    from app.api.inventory import bp as inventory_bp
+    from app.api.bom import bp as bom_bp
 
     blueprints = [
         auth_bp,
-        # app.api.inventory.bp,
-        # app.api.bom.bp,
+        inventory_bp,
+        bom_bp,
         # app.api.work_orders.bp,
         # app.api.purchasing.bp,
         # app.api.sales_orders.bp,

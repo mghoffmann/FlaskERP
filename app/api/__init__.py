@@ -25,9 +25,37 @@ see :func:`get_json_or_400` below — so that shared logic has exactly one
 home instead of being copy-pasted (or subtly reimplemented) per module.
 """
 
+from datetime import timezone
+
 from flask import request
 
 from app.errors import ApiError
+
+
+def iso(dt):
+    """Format a timezone-aware ``datetime`` as an ISO-8601 UTC string ending in ``Z``.
+
+    00-architecture.md's JSON convention is explicit about the wire
+    format: ``"2026-08-17T14:30:00Z"``, not the ``+00:00`` offset suffix
+    Python's own ``datetime.isoformat()`` produces by default. Every
+    timestamp column in ``app/models.py`` is ``TIMESTAMPTZ`` (timezone-aware),
+    so SQLAlchemy always hands this a UTC-aware ``datetime`` — this helper
+    just reformats it, it does not need to guess or attach a timezone.
+    ``astimezone(timezone.utc)`` is a defensive normalization (in case a
+    future caller ever passes something not already in UTC) before the
+    ``+00:00`` -> ``Z`` swap.
+
+    Args:
+        dt: A timezone-aware ``datetime.datetime``, or ``None``.
+
+    Returns:
+        str | None: The formatted timestamp, or ``None`` if ``dt`` is
+        ``None`` (lets a caller write ``iso(document.shipped_at)`` for an
+        optional timestamp column without a separate null check).
+    """
+    if dt is None:
+        return None
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def get_json_or_400():
