@@ -1,0 +1,95 @@
+<!--
+  index.html — the dashboard / landing page shown right after login.
+  Static markup only: js/index.js makes one GET /api/dashboard call and
+  fills in the four KPI tiles plus the three tables from that single
+  response (one paint, no per-tile spinners). See
+  requirements/08-dashboard.md "Page > /index.html".
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Dashboard</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <h1>Dashboard</h1>
+
+      <!-- Four KPI tiles, each a real link (09-frontend.md: "every tile ...
+           navigates somewhere useful"). Values/accent are filled in by
+           index.js from the single GET /api/dashboard response; the hrefs
+           are static since they don't depend on the data. -->
+      <div class="kpi-grid">
+        <a href="/parts.html?low_stock=true" class="kpi-tile" id="kpi-low-stock">
+          <span class="kpi-value" id="kpi-low-stock-value">—</span>
+          <span class="kpi-label">Low stock</span>
+        </a>
+        <a href="/work-orders.html" class="kpi-tile" id="kpi-open-wo">
+          <span class="kpi-value" id="kpi-open-wo-value">—</span>
+          <span class="kpi-label">Open work orders</span>
+        </a>
+        <a href="/purchase-orders.html?status=ordered" class="kpi-tile" id="kpi-po-transit">
+          <span class="kpi-value" id="kpi-po-transit-value">—</span>
+          <span class="kpi-label">POs in transit</span>
+        </a>
+        <a href="/sales-orders.html?status=confirmed" class="kpi-tile" id="kpi-so-ship">
+          <span class="kpi-value" id="kpi-so-ship-value">—</span>
+          <span class="kpi-label">SOs to ship</span>
+        </a>
+      </div>
+
+      <section class="card dashboard-section">
+        <h2>Low stock</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th class="num">On hand</th>
+              <th class="num">Reorder point</th>
+              <th class="num">Shortfall</th>
+            </tr>
+          </thead>
+          <tbody id="low-stock-tbody"></tbody>
+        </table>
+      </section>
+
+      <section class="card dashboard-section">
+        <h2>Open work orders</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>WO #</th>
+              <th>Product</th>
+              <th class="num">Qty</th>
+              <th>Status</th>
+              <th>Age</th>
+            </tr>
+          </thead>
+          <tbody id="open-wo-tbody"></tbody>
+        </table>
+      </section>
+
+      <section class="card dashboard-section">
+        <h2>Recent activity</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Part</th>
+              <th class="num">Qty</th>
+              <th>Reason</th>
+              <th>Reference</th>
+              <th>User</th>
+            </tr>
+          </thead>
+          <tbody id="recent-tbody"></tbody>
+        </table>
+      </section>
+    </main>
+    <script type="module" src="/js/index.js"></script>
+  </body>
+</html>

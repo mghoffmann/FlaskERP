@@ -193,6 +193,7 @@ def create_app(config_name=None):
     from app.api.work_orders import bp as work_orders_bp
     from app.api.purchasing import bp as purchasing_bp
     from app.api.sales_orders import bp as sales_orders_bp
+    from app.api.dashboard import bp as dashboard_bp
 
     blueprints = [
         auth_bp,
@@ -201,7 +202,7 @@ def create_app(config_name=None):
         work_orders_bp,
         purchasing_bp,
         sales_orders_bp,
-        # app.api.dashboard.bp,
+        dashboard_bp,
     ]
     for bp in blueprints:
         app.register_blueprint(bp)

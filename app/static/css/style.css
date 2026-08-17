@@ -354,3 +354,32 @@ td input[type="text"], td input[type="number"] {
    than a bulleted <ul>. */
 .link-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .link-list-item { font-size: 0.9em; }
+
+/* 15. Dashboard (index.html) — added for the dashboard task. The four KPI
+   tiles reuse .card's surface/border/radius/shadow rather than a new shape;
+   the only new pieces are the tile-as-link layout and the red "needs
+   attention" accent (08-dashboard.md: red when the low-stock count > 0). */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }
+
+.kpi-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+  text-decoration: none;
+  color: inherit;
+  min-height: 44px;
+}
+.kpi-tile:hover { border-color: var(--color-accent); }
+.kpi-tile.-danger { border-color: var(--color-danger); background: var(--color-danger-bg); }
+.kpi-value { font-size: 2em; font-weight: 700; line-height: 1.1; }
+.kpi-tile.-danger .kpi-value { color: var(--color-danger); }
+.kpi-label { color: var(--color-text-muted); font-size: 0.9em; }
+
+/* Dashboard section cards: title + table, spaced the same as detail-page
+   card sections (section 4's .card already supplies surface/border/radius). */
+.dashboard-section h2 { font-size: 1.1em; }
