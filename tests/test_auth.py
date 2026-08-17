@@ -20,7 +20,7 @@ from typing import Callable, NamedTuple, Optional, Union
 import pytest
 
 from app.extensions import db
-from conftest import make_part, make_user, make_wo
+from conftest import make_customer, make_part, make_po, make_so, make_supplier, make_user, make_wo
 
 # ---------------------------------------------------------------------------
 # The protected-endpoint sweep
@@ -99,6 +99,36 @@ ENDPOINTS = [
     # "Auth: any" per 05-work-orders.md — the operator's button.
     Endpoint("POST", lambda seeded: f"/api/work-orders/{seeded.wo.id}/complete", None),
     Endpoint("POST", lambda seeded: f"/api/work-orders/{seeded.wo.id}/cancel", "admin"),
+    # --- app/api/purchasing.py (06-purchasing.md) ---
+    Endpoint("GET", "/api/suppliers", None),
+    Endpoint("POST", "/api/suppliers", "admin"),
+    Endpoint("GET", lambda seeded: f"/api/suppliers/{seeded.supplier.id}", None),
+    Endpoint("PUT", lambda seeded: f"/api/suppliers/{seeded.supplier.id}", "admin"),
+    Endpoint("DELETE", lambda seeded: f"/api/suppliers/{seeded.supplier.id}", "admin"),
+    Endpoint("POST", lambda seeded: f"/api/suppliers/{seeded.supplier.id}/activate", "admin"),
+    Endpoint("GET", "/api/purchase-orders", None),
+    Endpoint("POST", "/api/purchase-orders", "admin"),
+    Endpoint("GET", lambda seeded: f"/api/purchase-orders/{seeded.po.id}", None),
+    Endpoint("PUT", lambda seeded: f"/api/purchase-orders/{seeded.po.id}", "admin"),
+    Endpoint("POST", lambda seeded: f"/api/purchase-orders/{seeded.po.id}/place", "admin"),
+    # "Auth: any" per 06-purchasing.md — the operator signs for the delivery.
+    Endpoint("POST", lambda seeded: f"/api/purchase-orders/{seeded.po.id}/receive", None),
+    Endpoint("POST", lambda seeded: f"/api/purchase-orders/{seeded.po.id}/cancel", "admin"),
+    # --- app/api/sales_orders.py (07-sales-orders.md) ---
+    Endpoint("GET", "/api/customers", None),
+    Endpoint("POST", "/api/customers", "admin"),
+    Endpoint("GET", lambda seeded: f"/api/customers/{seeded.customer.id}", None),
+    Endpoint("PUT", lambda seeded: f"/api/customers/{seeded.customer.id}", "admin"),
+    Endpoint("DELETE", lambda seeded: f"/api/customers/{seeded.customer.id}", "admin"),
+    Endpoint("POST", lambda seeded: f"/api/customers/{seeded.customer.id}/activate", "admin"),
+    Endpoint("GET", "/api/sales-orders", None),
+    Endpoint("POST", "/api/sales-orders", "admin"),
+    Endpoint("GET", lambda seeded: f"/api/sales-orders/{seeded.so.id}", None),
+    Endpoint("PUT", lambda seeded: f"/api/sales-orders/{seeded.so.id}", "admin"),
+    Endpoint("POST", lambda seeded: f"/api/sales-orders/{seeded.so.id}/confirm", "admin"),
+    # "Auth: any" per 07-sales-orders.md — the operator loads the truck.
+    Endpoint("POST", lambda seeded: f"/api/sales-orders/{seeded.so.id}/ship", None),
+    Endpoint("POST", lambda seeded: f"/api/sales-orders/{seeded.so.id}/cancel", "admin"),
 ]
 
 
@@ -123,12 +153,26 @@ def seeded():
     A later module needing a *different* kind of seeded object (a
     supplier, ...) should extend this same fixture rather than
     duplicating it.
+
+    Also attaches ``.supplier``/``.po``/``.customer``/``.so`` for
+    06-purchasing.md's and 07-sales-orders.md's path-param endpoints, via
+    ``make_supplier``/``make_po``/``make_customer``/``make_so``. The PO
+    and SO are left in ``draft`` with no lines (the factories' default) —
+    same reasoning as the WO above: the sweep never reaches route-body
+    validation, so an empty draft document is enough to exercise every
+    path-param route (including ``/place``, ``/receive``, ``/confirm``,
+    ``/ship``, ``/cancel``) without needing real line items. Both reuse
+    this fixture's own ``creator`` rather than standing up separate users.
     """
     part = make_part()
     creator = make_user("seeded_wo_creator", "admin")
     wo = make_wo(part, 1, creator)
+    supplier = make_supplier()
+    po = make_po(supplier, creator)
+    customer = make_customer()
+    so = make_so(customer, creator)
     db.session.commit()
-    return SimpleNamespace(part=part, wo=wo)
+    return SimpleNamespace(part=part, wo=wo, supplier=supplier, po=po, customer=customer, so=so)
 
 
 def _resolve_path(endpoint, seeded):
