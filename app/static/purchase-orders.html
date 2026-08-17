@@ -1,0 +1,63 @@
+<!--
+  purchase-orders.html — the purchase order list. Static markup only:
+  js/purchase-orders.js fetches the list once, renders the status tabs +
+  counts, and filters the table (by status tab and supplier dropdown)
+  client-side. See requirements/06-purchasing.md "Pages > /purchase-orders.html".
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Purchase Orders</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <div class="page-header">
+        <h1>Purchase Orders</h1>
+        <!-- data-role="admin": app.js's initShell() removes this for operators
+             (UX only — POST /api/purchase-orders is admin-only on the server too). -->
+        <button type="button" id="new-po-btn" class="btn btn-primary" data-role="admin">New purchase order</button>
+      </div>
+
+      <!-- Status filter tabs, built from a single fetch of GET /api/purchase-orders
+           (no status/supplier_id params) so counts and filtering are both
+           client-side, mirroring the work-orders.html pattern. The current
+           tab + supplier round-trip through the query string (setQs) so
+           ?status=ordered&supplier_id=3 is a linkable/bookmarkable view. -->
+      <nav class="tabs" id="status-tabs" aria-label="Filter by status">
+        <button type="button" class="tab" data-status="">All <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="draft">Draft <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="ordered">Ordered <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="received">Received <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="canceled">Canceled <span class="tab-count"></span></button>
+      </nav>
+
+      <div class="toolbar">
+        <select id="supplier-filter" class="toolbar-select" aria-label="Supplier">
+          <option value="">All suppliers</option>
+        </select>
+        <!-- Reciprocal to suppliers.html's "Purchase orders →" link. -->
+        <a href="/suppliers.html" class="btn btn-ghost">Suppliers →</a>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>PO #</th>
+            <th>Supplier</th>
+            <th class="num">Lines</th>
+            <th class="num">Total</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Received</th>
+          </tr>
+        </thead>
+        <tbody id="po-tbody"></tbody>
+      </table>
+    </main>
+    <script type="module" src="/js/purchase-orders.js"></script>
+  </body>
+</html>

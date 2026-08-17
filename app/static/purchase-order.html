@@ -1,0 +1,85 @@
+<!--
+  purchase-order.html — one page, three modes (create / view / edit) per
+  requirements/06-purchasing.md "Pages > /purchase-order.html?id={id}".
+  Static shell only: js/purchase-order.js reads ?id= (absent = create mode)
+  and fills/builds everything in.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Purchase order</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <!-- Shown instead of #po-content when GET /api/purchase-orders/{id}
+           404s or ?id= is present but non-numeric, per requirements/09-frontend.md's
+           "unknown id shows a Not found banner, not a blank page" rule. -->
+      <div id="not-found-banner" class="banner -error" hidden>Purchase order not found.</div>
+
+      <div id="po-content">
+        <div class="page-header">
+          <div>
+            <h1 id="po-title"></h1>
+            <div id="po-badges" class="badge-row"></div>
+          </div>
+          <div id="po-actions" class="page-header-actions"></div>
+        </div>
+
+        <!-- Page-level banner for 400/409 responses from save/place/cancel/
+             receive (e.g. "Cannot receive: PO is not ordered"). Shared by
+             both view-mode actions and the create/edit form. -->
+        <div id="po-banner" class="banner -error" hidden></div>
+
+        <!-- View mode: header details + read-only lines table. Hidden in
+             create/edit mode. -->
+        <section id="po-view-section" class="card" hidden>
+          <h2>Details</h2>
+          <dl class="wo-meta">
+            <div><dt>Supplier</dt><dd id="po-supplier"></dd></div>
+            <div><dt>Notes</dt><dd id="po-notes"></dd></div>
+            <div><dt>Created by</dt><dd id="po-created-by"></dd></div>
+            <div><dt>Created</dt><dd id="po-created-at"></dd></div>
+            <div><dt>Ordered</dt><dd id="po-ordered-at"></dd></div>
+            <div><dt>Received</dt><dd id="po-received-at"></dd></div>
+          </dl>
+        </section>
+
+        <section id="po-view-lines-section" class="card" hidden>
+          <h2>Lines</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Part</th>
+                <th class="num">Qty</th>
+                <th class="num">Unit cost</th>
+                <th class="num">Line total</th>
+              </tr>
+            </thead>
+            <tbody id="po-lines-tbody"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3">Total</td>
+                <td class="num" id="po-lines-total"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+
+        <!-- Create/edit mode: supplier picker, notes, editable lines grid.
+             Built entirely by JS (js/purchase-order.js's renderEditForm())
+             into #po-edit-container, same pattern as part.js's BOM editor
+             building into #bom-content — the field/row shapes differ enough
+             between create and edit (and from the read-only view above) that
+             a fully static form here would mostly go unused. -->
+        <section id="po-edit-section" class="card" hidden>
+          <div id="po-edit-container"></div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/js/purchase-order.js"></script>
+  </body>
+</html>

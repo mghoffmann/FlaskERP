@@ -345,3 +345,12 @@ td input[type="text"], td input[type="number"] {
 /* Components table: short>0 cells stand out red, same danger tone as the
    movements ledger's negative quantities. */
 .num.-short { color: var(--color-danger); font-weight: 700; }
+
+/* 14. Purchasing (suppliers.html / purchase-orders.html / purchase-order.html)
+   — added for the purchasing task. Everything else on these pages reuses
+   .tabs/.toolbar/.badge/.field/.modal-*/table styles already defined above;
+   the one new shape is the supplier detail modal's purchase-order history
+   list (js/suppliers.js), which needs to read as a plain link list rather
+   than a bulleted <ul>. */
+.link-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.link-list-item { font-size: 0.9em; }
