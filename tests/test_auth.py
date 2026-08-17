@@ -129,6 +129,10 @@ ENDPOINTS = [
     # "Auth: any" per 07-sales-orders.md — the operator loads the truck.
     Endpoint("POST", lambda seeded: f"/api/sales-orders/{seeded.so.id}/ship", None),
     Endpoint("POST", lambda seeded: f"/api/sales-orders/{seeded.so.id}/cancel", "admin"),
+    # --- app/api/dashboard.py (08-dashboard.md) ---
+    # "Auth: any" -- there is nothing on the dashboard an operator
+    # shouldn't see, so it's role=None like every other any-role route.
+    Endpoint("GET", "/api/dashboard", None),
 ]
 
 

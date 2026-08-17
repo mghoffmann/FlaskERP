@@ -1,0 +1,142 @@
+# Shopfloor ERP — Continuous Integration
+#
+# 10-testing.md's CI section, spelled out in YAML. Every step below has a
+# comment explaining *why* it exists, not just what command it runs — this
+# file is as much a worked example of a GitHub Actions workflow as it is
+# the thing that actually gates merges, since the repo owner is learning
+# both Flask/Alembic and CI patterns from this project (AGENTS.md).
+#
+# **What's a "workflow"?** A YAML file under `.github/workflows/` that
+# GitHub Actions runs automatically in response to repository events (a
+# push, a pull request, ...). `on:` below declares which events trigger
+# it; `jobs:` declares what actually runs. GitHub provisions a fresh,
+# disposable virtual machine for each job — nothing persists between runs
+# except what an explicit cache step (see `cache: "pip"` below) saves.
+name: CI
+
+# Run on every push to, and every pull request targeting, either
+# long-lived branch: `main` (the release branch) and `development` (this
+# repo's actual day-to-day working branch, per AGENTS.md/git history).
+# Excluding feature branches from `push` keeps CI minutes focused on the
+# branches that matter; a PR targeting either still gets tested via the
+# `pull_request` trigger regardless of what branch it comes *from*.
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # A real PostgreSQL 16 instance, not SQLite, for the whole job — the
+    # same reasoning tests/conftest.py's module docstring gives for why
+    # the test suite itself runs against Postgres: this schema leans on
+    # `CHECK` constraints and `SELECT ... FOR UPDATE` row locking that
+    # SQLite either doesn't support or behaves differently under.
+    # `services:` tells Actions to start this as a sibling container
+    # alongside the job's own VM, reachable at `localhost` because of the
+    # `ports:` mapping below.
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp
+          POSTGRES_DB: erp
+        ports:
+          - 5432:5432
+        # Postgres needs a moment after container start before it's
+        # actually accepting connections. Without a health check, the
+        # very next step could try to connect during that window and
+        # fail flakily; Actions waits for `pg_isready` to succeed (or
+        # gives up after health-retries * health-interval seconds)
+        # before letting any job step run.
+        options: >-
+          --health-cmd "pg_isready -U erp -d erp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Environment variables shared by every step below (00-architecture.md's
+    # `DATABASE_URL`/`SECRET_KEY` config contract, plus the test suite's
+    # own `TEST_DATABASE_URL` — see tests/conftest.py). `localhost:5432`
+    # works here (rather than a Docker service hostname like `db`) because
+    # the `ports:` mapping above exposes the service container's 5432 on
+    # the job VM's own loopback interface.
+    env:
+      DATABASE_URL: postgresql+psycopg://erp:erp@localhost:5432/erp
+      TEST_DATABASE_URL: postgresql+psycopg://erp:erp@localhost:5432/erp_test
+      FLASK_APP: app
+      # `create_app()` refuses to start in production without a real
+      # `SECRET_KEY` (00-architecture.md), but `flask db upgrade`/`check`
+      # and pytest both build the app via `create_app()` too — the
+      # testing config accepts this placeholder since nothing here is a
+      # real deployment.
+      SECRET_KEY: ci-placeholder-not-a-real-secret
+
+    steps:
+      # Clones the repository at the commit that triggered this run into
+      # the job's working directory — every workflow needs this first.
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # Installs the pinned Python 3.12 (00-architecture.md's target
+      # version) onto the job VM. `cache: "pip"` asks Actions to save and
+      # restore pip's download/wheel cache, keyed on a hash of
+      # requirements.txt — unchanged dependencies then install from the
+      # cache instead of re-downloading from PyPI on every single run.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # tests/conftest.py's session-scoped `app` fixture builds its own
+      # schema with `db.create_all()` against a *separate* `erp_test`
+      # database (fast, and 10-testing.md explicitly allows it — the
+      # migration chain itself is verified by the "Run database
+      # migrations" step below, against the `erp` database instead). One
+      # `psql` command against the same service container creates that
+      # second database before pytest ever runs; `erp_test` doesn't exist
+      # yet on a fresh Postgres 16 container, only the `erp` database
+      # `POSTGRES_DB` created above.
+      - name: Create the erp_test database
+        run: PGPASSWORD=erp psql -h localhost -U erp -d erp -c "CREATE DATABASE erp_test;"
+
+      # Applies every migration under migrations/versions/, in order, to
+      # a brand-new `erp` database — the same command entrypoint.sh runs
+      # on container start in production (11-deployment.md). This is the
+      # step that actually exercises the migration chain end to end;
+      # pytest's own schema setup deliberately does not (see above), so a
+      # migration that's missing, out of order, or fails to apply cleanly
+      # is caught right here, not discovered later against a real
+      # deployment.
+      - name: Run database migrations
+        run: flask db upgrade
+
+      # `flask db check` is Flask-Migrate's wrapper around Alembic's
+      # `alembic check`: it diffs the schema the migration chain just
+      # built (above) against what `flask db migrate` would autogenerate
+      # from app/models.py *right now*, and fails the build if they
+      # differ. The concrete mistake this catches: a developer edits a
+      # model (adds a column, changes a constraint, renames something)
+      # and forgets to run `flask db migrate` to generate the matching
+      # migration file. Without this step, that gap would sail through
+      # CI unnoticed — pytest's `db.create_all()`-based schema setup
+      # would just quietly pick up the model change with no migration to
+      # compare against — and would only surface later as a broken
+      # production deploy (or a support engineer staring at a live
+      # database that doesn't match models.py).
+      - name: Verify models match migrations
+        run: flask db check
+
+      # The actual test suite (tests/, 10-testing.md), against the
+      # `erp_test` database created above. `-q` mirrors scripts/t.py's
+      # own terse-output convention.
+      - name: Run the test suite
+        run: pytest -q
