@@ -1,0 +1,53 @@
+<!--
+  work-orders.html — the work order list. Static markup only: js/work-orders.js
+  fetches the list once, renders the status tabs + counts, and filters the
+  table client-side. See requirements/05-work-orders.md "Pages > /work-orders.html".
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Work Orders</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <div class="page-header">
+        <h1>Work Orders</h1>
+        <!-- data-role="admin": app.js's initShell() removes this for operators
+             (UX only — POST /api/work-orders is admin-only on the server too). -->
+        <button type="button" id="new-wo-btn" class="btn btn-primary" data-role="admin">New work order</button>
+      </div>
+
+      <!-- Status filter tabs, built by work-orders.js from a single fetch of
+           GET /api/work-orders (no status param) so counts and filtering are
+           both client-side — requirements/05-work-orders.md. The current tab
+           is round-tripped through the query string (setQs) so ?status=released
+           is a linkable/bookmarkable view. -->
+      <nav class="tabs" id="status-tabs" aria-label="Filter by status">
+        <button type="button" class="tab" data-status="">All <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="draft">Draft <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="released">Released <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="completed">Completed <span class="tab-count"></span></button>
+        <button type="button" class="tab" data-status="canceled">Canceled <span class="tab-count"></span></button>
+      </nav>
+
+      <table>
+        <thead>
+          <tr>
+            <th>WO #</th>
+            <th>Product</th>
+            <th class="num">Qty</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Completed</th>
+          </tr>
+        </thead>
+        <tbody id="wo-tbody"></tbody>
+      </table>
+    </main>
+    <script type="module" src="/js/work-orders.js"></script>
+  </body>
+</html>

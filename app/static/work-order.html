@@ -1,0 +1,72 @@
+<!--
+  work-order.html — work order detail page: header, availability/status banner,
+  components table, action buttons by status/role. Static shell only:
+  js/work-order.js reads ?id= and fills everything in. See
+  requirements/05-work-orders.md "Pages > /work-order.html".
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopfloor ERP — Work order detail</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header id="nav"></header>
+    <main class="page">
+      <!-- Shown instead of #wo-content when GET /api/work-orders/{id} 404s or
+           ?id= is missing/non-numeric, per requirements/09-frontend.md's
+           "unknown id shows a Not found banner, not a blank page" rule. -->
+      <div id="not-found-banner" class="banner -error" hidden>Work order not found.</div>
+
+      <div id="wo-content" hidden>
+        <div class="page-header">
+          <div>
+            <h1 id="wo-title"></h1>
+            <div id="wo-badges" class="badge-row"></div>
+          </div>
+          <div id="wo-actions" class="page-header-actions"></div>
+        </div>
+
+        <!-- Page-level banner for 400/409 responses from release/cancel/complete
+             (e.g. "Cannot release: BOM is empty", insufficient_stock message). -->
+        <div id="wo-banner" class="banner -error" hidden></div>
+
+        <!-- Availability banner: green "Ready to build" / amber "Short N
+             components" while released; hidden for draft/completed/canceled. -->
+        <div id="availability-banner" class="banner" hidden></div>
+
+        <section class="card">
+          <h2>Details</h2>
+          <dl class="wo-meta">
+            <div><dt>Product</dt><dd id="wo-product"></dd></div>
+            <div><dt>Qty</dt><dd id="wo-qty"></dd></div>
+            <div><dt>Notes</dt><dd id="wo-notes"></dd></div>
+            <div><dt>Created by</dt><dd id="wo-created-by"></dd></div>
+            <div><dt>Created</dt><dd id="wo-created-at"></dd></div>
+            <div><dt>Released</dt><dd id="wo-released-at"></dd></div>
+            <div><dt>Completed</dt><dd id="wo-completed-at"></dd></div>
+          </dl>
+        </section>
+
+        <section class="card">
+          <h2>Components</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th class="num">Qty per</th>
+                <th class="num">Required</th>
+                <th class="num">On hand</th>
+                <th class="num">Short</th>
+              </tr>
+            </thead>
+            <tbody id="components-tbody"></tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/js/work-order.js"></script>
+  </body>
+</html>
