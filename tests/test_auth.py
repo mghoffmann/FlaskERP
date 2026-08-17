@@ -20,7 +20,7 @@ from typing import Callable, NamedTuple, Optional, Union
 import pytest
 
 from app.extensions import db
-from conftest import make_part, make_user
+from conftest import make_part, make_user, make_wo
 
 # ---------------------------------------------------------------------------
 # The protected-endpoint sweep
@@ -90,6 +90,15 @@ ENDPOINTS = [
     # --- app/api/bom.py (04-bom.md) ---
     Endpoint("GET", lambda seeded: f"/api/parts/{seeded.part.id}/bom", None),
     Endpoint("PUT", lambda seeded: f"/api/parts/{seeded.part.id}/bom", "admin"),
+    # --- app/api/work_orders.py (05-work-orders.md) ---
+    Endpoint("GET", "/api/work-orders", None),
+    Endpoint("POST", "/api/work-orders", "admin"),
+    Endpoint("GET", lambda seeded: f"/api/work-orders/{seeded.wo.id}", None),
+    Endpoint("PUT", lambda seeded: f"/api/work-orders/{seeded.wo.id}", "admin"),
+    Endpoint("POST", lambda seeded: f"/api/work-orders/{seeded.wo.id}/release", "admin"),
+    # "Auth: any" per 05-work-orders.md — the operator's button.
+    Endpoint("POST", lambda seeded: f"/api/work-orders/{seeded.wo.id}/complete", None),
+    Endpoint("POST", lambda seeded: f"/api/work-orders/{seeded.wo.id}/cancel", "admin"),
 ]
 
 
@@ -102,13 +111,24 @@ def seeded():
     all of them — the ``require_login`` decorator (see app/api/auth.py)
     short-circuits with 401/403 before any route body/type validation
     runs, so the part's ``part_type``/status don't matter for this sweep.
-    A later module needing a *different* kind of seeded object (a work
-    order, a supplier, ...) should extend this same fixture rather than
+
+    Also attaches ``.wo`` via ``make_wo``, for the work-order endpoints
+    with a path param: an arbitrary ``draft`` WO on that same part is
+    enough, for the same reason — the sweep never reaches route-body
+    validation. Its creator is a disposable admin user distinct from
+    ``admin_client``'s/``operator_client``'s own fixture users (this
+    fixture doesn't know which of those, if either, a given test will
+    use), so it's created directly rather than borrowed from one of them.
+
+    A later module needing a *different* kind of seeded object (a
+    supplier, ...) should extend this same fixture rather than
     duplicating it.
     """
     part = make_part()
+    creator = make_user("seeded_wo_creator", "admin")
+    wo = make_wo(part, 1, creator)
     db.session.commit()
-    return SimpleNamespace(part=part)
+    return SimpleNamespace(part=part, wo=wo)
 
 
 def _resolve_path(endpoint, seeded):
