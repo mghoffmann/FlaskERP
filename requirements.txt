@@ -1,0 +1,16 @@
+# Shopfloor ERP — Python dependencies.
+#
+# Pinned with the "compatible release" operator (~=), e.g. `Flask~=3.1`
+# means "install the latest 3.1.x" — it will pick up bug fixes but never
+# jump to 3.2 on its own. That keeps `pip install -r requirements.txt`
+# reproducible across dev/CI/prod without hand-pinning exact patch
+# versions that go stale the moment a security fix ships.
+
+Flask~=3.1                 # web framework: routing, request/response, app factory pattern
+Flask-SQLAlchemy~=3.1      # binds SQLAlchemy's ORM to a Flask app (db.init_app)
+SQLAlchemy~=2.0            # ORM / SQL toolkit; declarative models live on SQLAlchemy 2.x's typed Mapped[...] style
+Flask-Migrate~=4.1         # wraps Alembic to give `flask db init/migrate/upgrade` commands
+psycopg[binary]~=3.2       # PostgreSQL driver (psycopg 3); [binary] avoids needing build tools/libpq-dev
+gunicorn~=23.0             # production WSGI server, used in the container (not for `flask run`)
+pytest~=8.3                # test runner for the pytest suite under tests/
+python-dotenv~=1.0         # loads .env into os.environ for local dev (`flask run` autoloads it)
