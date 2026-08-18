@@ -140,3 +140,75 @@ jobs:
       # own terse-output convention.
       - name: Run the test suite
         run: pytest -q
+
+  # Continuous deployment: push to `main` -> tests pass -> the droplet
+  # redeploys itself. This job replaces any external deploy automation
+  # (e.g. a paid app platform polling the repo): GitHub already knows the
+  # instant a push lands, and the `needs:` gate below means a commit that
+  # breaks the 121-test suite can never reach production at all.
+  deploy:
+    # `needs: test` makes this job wait for the `test` job above and run
+    # only if it SUCCEEDED — the whole point of deploying from CI instead
+    # of a bare "on push" webhook.
+    needs: test
+
+    # Deploy only on a direct push to main. Without this `if:`, the job
+    # would also fire for pushes to development and for pull_request
+    # events (where deploying would be actively wrong — PR CI runs the
+    # *proposed* code). Day-to-day pushes go to development; merging
+    # development into main and pushing is the "release" action that
+    # triggers a deploy.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    # If two pushes to main land back-to-back, run their deploys one at a
+    # time instead of letting two `git pull && docker compose up` races
+    # overlap on the droplet. `cancel-in-progress: false` queues the
+    # second rather than killing the first mid-build.
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    steps:
+      # No checkout needed: this job never touches the repo's code. It
+      # only SSHes into the droplet, and the droplet pulls the code itself.
+      #
+      # Two repository secrets configure it (GitHub repo -> Settings ->
+      # Secrets and variables -> Actions):
+      #   DEPLOY_HOST     the droplet's public IP (or DNS name)
+      #   DEPLOY_SSH_KEY  a private SSH key whose PUBLIC half is in the
+      #                   droplet's ~/.ssh/authorized_keys. Generate a
+      #                   dedicated keypair for CI (ssh-keygen -t ed25519)
+      #                   rather than reusing a personal key, so it can be
+      #                   revoked independently by deleting one line from
+      #                   authorized_keys.
+      # Secrets are exposed to the script via `env:` (not inlined into
+      # `run:`) so the shell never has the secret inside the command text
+      # that Actions echoes into the log.
+      - name: Deploy over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        # StrictHostKeyChecking=accept-new: trust the droplet's host key
+        # on first connection, then PIN it — a later mismatch (droplet
+        # impersonation / MITM) still aborts. Each CI run gets a fresh VM
+        # so "first connection" is every run; pinning across runs would
+        # need the host key stored as a third secret, which is more
+        # ceremony than a demo deploy warrants.
+        #
+        # The remote command is the same one the README's runbook gives
+        # for a manual redeploy: pull whatever main now points at, then
+        # `up -d --build` — which rebuilds the app image and replaces only
+        # the app container (db and caddy, and therefore the data and the
+        # TLS certificate, are untouched). The image's entrypoint runs
+        # `flask db upgrade` before gunicorn starts, so schema migrations
+        # apply themselves as part of every deploy. `--ff-only` makes the
+        # pull refuse to invent a merge commit if the droplet's checkout
+        # ever diverges from origin/main — fail loudly, fix by hand.
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "root@$DEPLOY_HOST" \
+            'cd /opt/shopfloor-erp && git pull --ff-only && docker compose -f docker-compose.prod.yml up -d --build'

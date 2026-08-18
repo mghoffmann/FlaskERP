@@ -147,7 +147,11 @@ tradeoff, not an oversight.
    ```
 6. Verify: open `https://erp.yourdomain.com`, log in, complete the seeded released work
    order, and watch the dashboard change.
-7. Redeploy on change:
+7. Continuous deployment: the CI workflow's `deploy` job redeploys the droplet on every
+   push to `main` — but only after the test suite passes. One-time setup: generate a
+   dedicated CI keypair (`ssh-keygen -t ed25519`), append the public key to the droplet's
+   `~/.ssh/authorized_keys`, and add two GitHub Actions repository secrets: `DEPLOY_HOST`
+   (droplet IP) and `DEPLOY_SSH_KEY` (the private key). Manual fallback, on the droplet:
    ```bash
    git pull && docker compose -f docker-compose.prod.yml up -d --build
    ```
