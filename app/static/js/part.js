@@ -14,7 +14,17 @@
  * `if (user) { ... }` instead of returning early.
  */
 
-import { initShell, api, toast, fmtQty, fmtMoney, fmtDateTime, qs, el, ApiError } from "./app.js";
+import {
+  initShell,
+  api,
+  toast,
+  fmtQty,
+  fmtMoney,
+  fmtDateTime,
+  qs,
+  el,
+  ApiError,
+} from "./app.js";
 import { openFormModal, openConfirmModal } from "./modal.js";
 
 /** Maps stock_movements.ref_type (requirements/01-database.md) to the detail
@@ -122,7 +132,9 @@ function main(user) {
   function renderHeader(part) {
     partTitleEl.textContent = `${part.sku} — ${part.name}`;
 
-    const typeBadge = el("span", { class: "badge -info" }, [part.part_type === "finished" ? "Finished" : "Raw"]);
+    const typeBadge = el("span", { class: "badge -info" }, [
+      part.part_type === "finished" ? "Finished" : "Raw",
+    ]);
     const activeBadge = part.active
       ? el("span", { class: "badge -completed" }, ["Active"])
       : el("span", { class: "badge -canceled" }, ["Inactive"]);
@@ -142,7 +154,8 @@ function main(user) {
 
   // Same role-gating guard as above: these buttons don't exist for operators.
   if (editPartBtn) editPartBtn.addEventListener("click", openEditPartModal);
-  if (toggleActiveBtn) toggleActiveBtn.addEventListener("click", onToggleActive);
+  if (toggleActiveBtn)
+    toggleActiveBtn.addEventListener("click", onToggleActive);
 
   async function openEditPartModal() {
     const p = currentPart;
@@ -152,8 +165,22 @@ function main(user) {
         { name: "sku", label: "SKU", required: true, value: p.sku },
         { name: "name", label: "Name", required: true, value: p.name },
         { name: "unit", label: "Unit", value: p.unit },
-        { name: "reorder_point", label: "Reorder point", type: "number", step: "0.01", min: "0", value: p.reorder_point },
-        { name: "unit_cost", label: "Unit cost", type: "number", step: "0.01", min: "0", value: p.unit_cost },
+        {
+          name: "reorder_point",
+          label: "Reorder point",
+          type: "number",
+          step: "0.01",
+          min: "0",
+          value: p.reorder_point,
+        },
+        {
+          name: "unit_cost",
+          label: "Unit cost",
+          type: "number",
+          step: "0.01",
+          min: "0",
+          value: p.unit_cost,
+        },
       ],
       onSubmit: (values) =>
         api("PUT", `/api/parts/${partId}`, {
@@ -201,7 +228,8 @@ function main(user) {
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         conflictBanner.hidden = false;
-        conflictBanner.textContent = err.message || "This part is referenced by an open document.";
+        conflictBanner.textContent =
+          err.message || "This part is referenced by an open document.";
         toast(err.message || "Could not deactivate: part is in use.", "error");
       } else if (err instanceof ApiError) {
         toast(err.message, "error");
@@ -220,7 +248,13 @@ function main(user) {
     stockQtyValueEl.textContent = fmtQty(part.qty_on_hand);
     stockQtyUnitEl.textContent = part.unit;
     stockReorderEl.textContent = fmtQty(part.reorder_point);
-    lowStockWarningEl.hidden = !part.low_stock;
+    if (part.low_stock) {
+      lowStockWarningEl.hidden = true;
+      lowStockWarningEl.classList.add("hidden");
+    } else {
+      lowStockWarningEl.hidden = false;
+      lowStockWarningEl.classList.remove("hidden");
+    }
   }
 
   adjustStockBtn.addEventListener("click", openAdjustModal);
@@ -230,7 +264,13 @@ function main(user) {
       title: "Adjust stock",
       submitLabel: "Adjust",
       fields: [
-        { name: "qty_delta", label: `Quantity change (${currentPart.unit})`, type: "number", step: "any", required: true },
+        {
+          name: "qty_delta",
+          label: `Quantity change (${currentPart.unit})`,
+          type: "number",
+          step: "any",
+          required: true,
+        },
         { name: "note", label: "Note", type: "textarea", required: true },
       ],
       onSubmit: (values) =>
@@ -272,9 +312,14 @@ function main(user) {
         skuCell.unshift(
           el(
             "span",
-            { class: "warn-icon", title: !item.active ? "Component is inactive" : "Component is out of stock" },
-            ["⚠ "]
-          )
+            {
+              class: "warn-icon",
+              title: !item.active
+                ? "Component is inactive"
+                : "Component is out of stock",
+            },
+            ["⚠ "],
+          ),
         );
       }
       return el("tr", {}, [
@@ -287,7 +332,11 @@ function main(user) {
     });
 
     if (!rows.length) {
-      rows.push(el("tr", { class: "empty-row" }, [el("td", { colSpan: 5 }, ["No components."])]));
+      rows.push(
+        el("tr", { class: "empty-row" }, [
+          el("td", { colSpan: 5 }, ["No components."]),
+        ]),
+      );
     }
 
     const table = el("table", {}, [
@@ -357,13 +406,16 @@ function main(user) {
       lookup.set(p.sku.toUpperCase(), p.id);
     }
     for (const item of originalItems) {
-      if (!lookup.has(item.sku.toUpperCase())) lookup.set(item.sku.toUpperCase(), item.component_part_id);
+      if (!lookup.has(item.sku.toUpperCase()))
+        lookup.set(item.sku.toUpperCase(), item.component_part_id);
     }
 
     const datalist = el(
       "datalist",
       { id: datalistId },
-      activeParts.filter((p) => p.id !== partId).map((p) => el("option", { value: p.sku }, [p.name]))
+      activeParts
+        .filter((p) => p.id !== partId)
+        .map((p) => el("option", { value: p.sku }, [p.name])),
     );
 
     const banner = el("div", { class: "banner -error", hidden: true });
@@ -371,7 +423,12 @@ function main(user) {
     const rowsTbody = el("tbody");
 
     function addRow(item) {
-      const skuInput = el("input", { type: "text", required: true, placeholder: "SKU", value: item ? item.sku : "" });
+      const skuInput = el("input", {
+        type: "text",
+        required: true,
+        placeholder: "SKU",
+        value: item ? item.sku : "",
+      });
       // HTMLInputElement.list is a read-only IDL property (it returns the
       // associated <datalist>, it isn't settable) — el() would try a plain
       // property assignment for any attrs key that already exists on the
@@ -388,7 +445,11 @@ function main(user) {
       });
 
       const errorEl = el("div", { class: "field-error" });
-      const removeBtn = el("button", { type: "button", class: "btn btn-ghost", "aria-label": "Remove line" }, ["Remove"]);
+      const removeBtn = el(
+        "button",
+        { type: "button", class: "btn btn-ghost", "aria-label": "Remove line" },
+        ["Remove"],
+      );
 
       const rowEl = el("tr", {}, [
         el("td", {}, [skuInput, errorEl]),
@@ -408,11 +469,17 @@ function main(user) {
 
     for (const item of originalItems) addRow(item);
 
-    const addLineBtn = el("button", { type: "button", class: "btn" }, ["Add line"]);
+    const addLineBtn = el("button", { type: "button", class: "btn" }, [
+      "Add line",
+    ]);
     addLineBtn.addEventListener("click", () => addRow(null));
 
-    const saveBtn = el("button", { type: "button", class: "btn btn-primary" }, ["Save"]);
-    const cancelBtn = el("button", { type: "button", class: "btn btn-ghost" }, ["Cancel"]);
+    const saveBtn = el("button", { type: "button", class: "btn btn-primary" }, [
+      "Save",
+    ]);
+    const cancelBtn = el("button", { type: "button", class: "btn btn-ghost" }, [
+      "Cancel",
+    ]);
     cancelBtn.addEventListener("click", () => renderBomRead(lastBomData));
     saveBtn.addEventListener("click", () => saveBom());
 
@@ -466,7 +533,8 @@ function main(user) {
       } catch (err) {
         if (err instanceof ApiError && err.status === 400) {
           banner.hidden = false;
-          banner.textContent = err.message || "Fix the highlighted lines below.";
+          banner.textContent =
+            err.message || "Fix the highlighted lines below.";
           applyLineErrors(err.details, rows);
         } else if (err instanceof ApiError) {
           toast(err.message, "error");
@@ -482,12 +550,20 @@ function main(user) {
 
     const table = el("table", {}, [
       el("thead", {}, [
-        el("tr", {}, [el("th", {}, ["Component SKU"]), el("th", {}, ["Qty per"]), el("th", {}, [""])]),
+        el("tr", {}, [
+          el("th", {}, ["Component SKU"]),
+          el("th", {}, ["Qty per"]),
+          el("th", {}, [""]),
+        ]),
       ]),
       rowsTbody,
     ]);
 
-    const actions = el("div", { class: "modal-actions" }, [addLineBtn, cancelBtn, saveBtn]);
+    const actions = el("div", { class: "modal-actions" }, [
+      addLineBtn,
+      cancelBtn,
+      saveBtn,
+    ]);
     bomContent.replaceChildren(datalist, banner, table, actions);
   }
 
@@ -503,7 +579,13 @@ function main(user) {
     for (const detail of details) {
       if (!detail || typeof detail !== "object") continue;
       const idx =
-        typeof detail.line === "number" ? detail.line : typeof detail.index === "number" ? detail.index : typeof detail.row === "number" ? detail.row : null;
+        typeof detail.line === "number"
+          ? detail.line
+          : typeof detail.index === "number"
+            ? detail.index
+            : typeof detail.row === "number"
+              ? detail.row
+              : null;
       const message = detail.message || detail.error || detail.msg;
       if (idx !== null && rows[idx] && message) {
         rows[idx].errorEl.textContent = message;
@@ -530,7 +612,7 @@ function main(user) {
     try {
       data = await api(
         "GET",
-        `/api/parts/${partId}/movements?limit=${movementsState.limit}&offset=${movementsState.offset}`
+        `/api/parts/${partId}/movements?limit=${movementsState.limit}&offset=${movementsState.offset}`,
       );
     } catch {
       toast("Could not load movements.", "error");
@@ -540,9 +622,14 @@ function main(user) {
     movementsState.total = data.total;
 
     if (movementsState.offset === 0 && data.items.length === 0) {
-      movementsTbody.appendChild(el("tr", { class: "empty-row" }, [el("td", { colSpan: 6 }, ["No movements yet."])]));
+      movementsTbody.appendChild(
+        el("tr", { class: "empty-row" }, [
+          el("td", { colSpan: 6 }, ["No movements yet."]),
+        ]),
+      );
     } else {
-      for (const m of data.items) movementsTbody.appendChild(buildMovementRow(m));
+      for (const m of data.items)
+        movementsTbody.appendChild(buildMovementRow(m));
     }
 
     movementsState.offset += data.items.length;
@@ -553,7 +640,11 @@ function main(user) {
     const positive = m.qty_delta > 0;
     const qtyText = (positive ? "+" : "") + fmtQty(m.qty_delta);
     const refPage = REF_PAGES[m.ref_type];
-    const refCell = refPage ? el("a", { href: `${refPage}?id=${m.ref_id}` }, [m.ref_number || `#${m.ref_id}`]) : "—";
+    const refCell = refPage
+      ? el("a", { href: `${refPage}?id=${m.ref_id}` }, [
+          m.ref_number || `#${m.ref_id}`,
+        ])
+      : "—";
 
     return el("tr", {}, [
       el("td", {}, [fmtDateTime(m.created_at)]),
