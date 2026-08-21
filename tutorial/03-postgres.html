@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3. PostgreSQL — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html" aria-current="page">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>PostgreSQL for the <abbr title="Structured Query Language">SQL</abbr> Server developer</h1>
+<p class="subtitle">90% renames, 10% genuinely different — and the 10% shows up in this project's locking code.</p>
+
+<h2>Tooling: <code>psql</code> is your <abbr title="SQL Server Management Studio — Microsoft's database GUI">SSMS</abbr></h2>
+<p>The standard client is a <abbr title="Read-Eval-Print Loop — an interactive prompt that runs each command as you type it">REPL</abbr>, not a <abbr title="Graphical User Interface">GUI</abbr>. In this project you reach it through the
+container:</p>
+<pre><code>docker compose exec db psql -U erp -d erp
+
+erp=# \dt                  -- list tables            (≈ sys.tables)
+erp=# \d parts             -- describe a table        (≈ sp_help 'parts')
+erp=# \x                   -- toggle vertical output  (great for wide rows)
+erp=# SELECT * FROM parts LIMIT 5;
+erp=# \q                   -- quit
+</code></pre>
+<p>The backslash commands are psql metacommands, not <abbr title="Structured Query Language">SQL</abbr>. <abbr title="Graphical User Interface">GUIs</abbr> exist (pgAdmin, DBeaver,
+DataGrip) but knowing the four above covers daily work.</p>
+
+<h2>Dialect translation table</h2>
+<div class="table-scroll">
+<table>
+  <tr><th><abbr title="Structured Query Language">SQL</abbr> Server</th><th>PostgreSQL</th><th>Notes</th></tr>
+  <tr><td><code>BIGINT IDENTITY(1,1)</code></td><td><code>BIGINT GENERATED ALWAYS AS IDENTITY</code></td><td>The modern standard form; backed by a sequence. This project uses it for every <abbr title="Primary Key">PK</abbr>.</td></tr>
+  <tr><td><code>NVARCHAR(120)</code></td><td><code>VARCHAR(120)</code></td><td>Postgres is <abbr title="Unicode Transformation Format, 8-bit — the standard text encoding">UTF-8</abbr> throughout — the N-prefix distinction doesn't exist.</td></tr>
+  <tr><td><code>DATETIME2</code> / <code>DATETIMEOFFSET</code></td><td><code>TIMESTAMPTZ</code></td><td>Stores <abbr title="Coordinated Universal Time">UTC</abbr>, renders in the session's time zone. The only timestamp type worth using.</td></tr>
+  <tr><td><code>BIT</code></td><td><code>BOOLEAN</code></td><td>A real boolean: <code>WHERE active</code> works, no <code>= 1</code>.</td></tr>
+  <tr><td><code>DECIMAL(12,2)</code></td><td><code>NUMERIC(12,2)</code></td><td>Identical semantics. All quantities/money here are NUMERIC — never float.</td></tr>
+  <tr><td><code>SELECT TOP 20 ...</code></td><td><code>SELECT ... LIMIT 20 OFFSET 40</code></td><td>Also the paging idiom (≈ <code>OFFSET/FETCH</code>).</td></tr>
+  <tr><td><code>GETUTCDATE()</code></td><td><code>now()</code></td><td>This schema uses <code>server_default=now()</code> for <code>created_at</code>.</td></tr>
+  <tr><td><code>ISNULL(x, y)</code></td><td><code>COALESCE(x, y)</code></td><td>COALESCE works in both; prefer it.</td></tr>
+  <tr><td><code>[bracketed identifiers]</code></td><td><code>"quoted identifiers"</code></td><td>See the case-folding gotcha below.</td></tr>
+  <tr><td><code>+</code> for string concat</td><td><code>||</code></td><td></td></tr>
+  <tr><td><code>OUTPUT INSERTED.id</code></td><td><code>RETURNING id</code></td><td>Cleaner: any INSERT/UPDATE/DELETE can return rows.</td></tr>
+  <tr><td><code>sqlcmd</code></td><td><code>psql -c "..."</code></td><td>Each <code>-c</code> runs in its own transaction — matters for DROP DATABASE.</td></tr>
+  <tr><td><abbr title="Structured Query Language">SQL</abbr> Server Agent jobs</td><td>cron / external schedulers</td><td>Postgres has no built-in job agent.</td></tr>
+</table>
+</div>
+<div class="warn">
+Unquoted identifiers fold to <em>lowercase</em> in Postgres (<abbr title="Structured Query Language">SQL</abbr> Server preserves case and is
+usually case-insensitive). Create a table as <code>"StockMovements"</code> and you must quote it
+that way forever. The ecosystem convention — followed by this schema — is
+<code>snake_case</code> everywhere: <code>stock_movements</code>, <code>qty_on_hand</code>. That's
+also why the Python models look like the <abbr title="Structured Query Language">SQL</abbr>: the <abbr title="Object-Relational Mapper — maps database rows to objects (Entity Framework, SQLAlchemy)">ORM</abbr> never has to fight the naming.
+</div>
+
+<h2>The real difference: <abbr title="Multi-Version Concurrency Control — every query sees a consistent snapshot; readers and writers don't block each other">MVCC</abbr> and locking</h2>
+<p>The biggest behavioral difference is concurrency. Postgres uses <abbr title="Multi-Version Concurrency Control — every query sees a consistent snapshot; readers and writers don't block each other">MVCC</abbr>
+(multi-version concurrency control) natively: <strong>readers never block writers and writers
+never block readers</strong> — a SELECT sees a consistent snapshot without shared locks. <abbr title="Structured Query Language">SQL</abbr>
+Server only behaves like this when <code>READ_COMMITTED_SNAPSHOT</code> is on; classic <abbr title="Structured Query Language">SQL</abbr> Server
+readers take shared locks and get blocked.</p>
+<p>When you genuinely need "read this row and keep others from changing it until I commit,"
+you say so explicitly:</p>
+<pre><code>-- Postgres                                  -- SQL Server equivalent
+SELECT * FROM parts                          SELECT * FROM parts
+WHERE id = 42                                WITH (UPDLOCK, ROWLOCK)
+FOR UPDATE;                                  WHERE id = 42;
+</code></pre>
+<p>This project's stock service does exactly this on every inventory change
+(via SQLAlchemy's <code>with_for_update=True</code>), because check-then-write on
+<code>qty_on_hand</code> is a race without it: two concurrent shipments could both read
+"5 on hand", both decide 3 is available, and drive stock negative.</p>
+<div class="talk">
+And the follow-up you can volunteer: once multiple rows get locked per transaction
+(a work-order completion locks every <abbr title="Bill of Materials — the list of component parts and quantities needed to build one unit of a product">BOM</abbr> component <em>and</em> the product), two transactions
+locking the same rows in different orders can deadlock. The fix is the classic one — a global
+lock ordering. Every multi-part transaction in this codebase sorts part IDs ascending before
+locking. Same theory as <abbr title="Structured Query Language">SQL</abbr> Server deadlock avoidance; Postgres just makes you ask for the
+locks explicitly instead of choosing hints.
+</div>
+
+<h2>Constraints instead of enums</h2>
+<p>Document statuses (<code>draft / ordered / received</code>...) are plain
+<code>VARCHAR</code> columns guarded by CHECK constraints, not Postgres's native
+<code>ENUM</code> type:</p>
+<pre><code>status VARCHAR(20) NOT NULL DEFAULT 'draft'
+    CONSTRAINT ck_purchase_orders_status_valid
+    CHECK (status IN ('draft', 'ordered', 'received', 'cancelled'))
+</code></pre>
+<p>Reason: adding a value to a CHECK constraint is a trivial migration; altering a native enum
+type is awkward. Same tradeoff discussion as .NET enums-as-int vs enums-as-string with a check
+constraint — this schema chose the readable, migration-friendly option.</p>
+
+<h2>Postgres administrivia this project actually uses</h2>
+<pre><code>-- databases are cheap; dev and tests use two on one server
+CREATE DATABASE erp_test;
+
+-- drop even with clients connected (used by the demo-reset runbook)
+DROP DATABASE erp WITH (FORCE);
+
+-- test isolation: wipe all tables, reset identities, honor FKs — in one statement
+TRUNCATE TABLE stock_movements, parts, users, ... RESTART IDENTITY CASCADE;
+</code></pre>
+<div class="dotnet">
+Postgres "database" ≈ <abbr title="Structured Query Language">SQL</abbr> Server database; there is no instance-level <code>master</code> you
+manage much — but note you cannot <code>DROP</code> the database you're connected to, so
+maintenance commands connect to the built-in <code>postgres</code> database first (the
+<code>master</code> role in that one respect). <code>TRUNCATE ... CASCADE</code> has no <abbr title="Structured Query Language">SQL</abbr> Server
+equivalent — there you'd delete in <abbr title="Foreign Key">FK</abbr> order or disable constraints; here one statement does it,
+which is why the test suite resets state this way between tests.
+</div>
+
+<h2>Drivers and connection strings</h2>
+<p>The app connects with <strong>psycopg 3</strong> (the Microsoft.Data.SqlClient of Postgres).
+SQLAlchemy <abbr title="Uniform Resource Locator">URLs</abbr> name the dialect and driver in the scheme:</p>
+<pre><code>postgresql+psycopg://erp:erp@localhost:5432/erp
+└────┬────┘ └──┬──┘   └┬┘ └┬┘ └───┬───┘ └┬┘ └┬┘
+  dialect    driver   user pwd   host  port  database
+</code></pre>
+<p>≈ <code>Server=localhost,1433;Database=erp;User Id=erp;Password=erp</code> — one <abbr title="Uniform Resource Locator">URL</abbr> instead of
+key-value pairs.</p>
+
+<div class="pager">
+  <a href="02-flask-anatomy.html">← 2. Flask anatomy</a>
+  <a href="04-data.html">4. Data &amp; migrations →</a>
+</div>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8. Backups &amp; audit — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html" aria-current="page">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>Data preservation and error correction</h1>
+<p class="subtitle">Snapshots, point-in-time recovery, audit trails, undoing mistakes, and keeping it all off the server — the questions an in-house-<abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> shop cares about most.</p>
+
+<p>A small company running its own <abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> has one asset that matters more than the code: the
+data. The questions that follow from that are: how do I freeze-frame the database and roll
+back to it? Who changed what, when, and why — and how do I undo it? And where do those
+safety copies live so that losing the server doesn't mean losing them? PostgreSQL has a
+ladder of answers, and this schema already has one built in.</p>
+
+<h2>Snapshots, tier 1: logical dumps with <code>pg_dump</code></h2>
+<p>One command produces a consistent point-in-time copy of a database <em>while it is
+live</em> — <abbr title="Multi-Version Concurrency Control — every query sees a consistent snapshot; readers and writers don't block each other">MVCC</abbr> gives the dump a stable snapshot without blocking writers:</p>
+<pre><code># freeze-frame (custom format: compressed, selectively restorable)
+docker compose -f docker-compose.prod.yml exec db pg_dump -U erp -Fc erp &gt; erp-2026-08-21.dump
+
+# roll back to it (--clean drops existing objects before recreating them)
+docker compose -f docker-compose.prod.yml exec -T db pg_restore -U erp -d erp --clean &lt; erp-2026-08-21.dump
+</code></pre>
+<p>This is the right tier for a small shop's nightly backup, and for the manual
+"snapshot before I run this risky migration" moment. Restore granularity is the whole
+dump: you get the database exactly as it was at dump time.</p>
+<div class="dotnet">
+<code>pg_dump</code> ≈ <code>BACKUP DATABASE</code> to a <code>.bak</code>;
+<code>pg_restore</code> ≈ <code>RESTORE DATABASE</code>. The difference in flavor: a dump is
+<em>logical</em> (<abbr title="Structured Query Language">SQL</abbr> statements / table data, portable across Postgres versions and even to
+other machines' architectures) where a <code>.bak</code> is a physical page copy. The physical
+analog exists too — <code>pg_basebackup</code> — and matters for the next tier.
+</div>
+
+<h2>Snapshots, tier 2: point-in-time recovery (<abbr title="Point-In-Time Recovery — rebuilding a database as of an exact moment by replaying the transaction log">PITR</abbr>)</h2>
+<p>Postgres continuously writes every change to the <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> — the write-ahead log, the exact
+analog of <abbr title="Structured Query Language">SQL</abbr> Server's transaction log — <em>before</em> touching the data files. If you
+(a) take a periodic physical base backup and (b) archive every <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> segment as it is
+produced, you can rebuild the database <strong>as of any instant</strong>: restore the base
+backup, set <code>recovery_target_time = '2026-08-21 14:02:00'</code>, and Postgres replays
+the log up to one second before the bad delete, then stops.</p>
+<p>Nobody wires this by hand in production. <strong>pgBackRest</strong> and
+<strong>wal-g</strong> are the standard tools: they manage base backups, ship <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr>
+continuously to storage, enforce retention, and drive the restore. With <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> shipping, your
+recovery point is minutes, not last-night.</p>
+<div class="dotnet">
+This whole tier is the full-plus-log-backup discipline you already know:
+base backup ≈ full backup, <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> archive ≈ log backups,
+<code>recovery_target_time</code> ≈ <code>RESTORE ... WITH STOPAT</code>. If you can explain
+<abbr title="Structured Query Language">SQL</abbr> Server log-shipping, you can explain <abbr title="Point-In-Time Recovery — rebuilding a database as of an exact moment by replaying the transaction log">PITR</abbr> — only the tool names change.
+</div>
+
+<h2>Snapshots, tier 3: machine images</h2>
+<p><abbr title="Structured Query Language">SQL</abbr> Server has a native <code>CREATE DATABASE ... AS SNAPSHOT</code> — an instant
+copy-on-write snapshot you can revert to. Postgres has <strong>no equivalent <abbr title="Structured Query Language">SQL</abbr>
+object</strong>; the nearest things are filesystem-level (a <abbr title="a filesystem with built-in copy-on-write snapshots">ZFS</abbr> or <abbr title="Logical Volume Manager — Linux disk layer with snapshot support">LVM</abbr> snapshot of the data
+directory) or, for this deployment, a <strong>DigitalOcean droplet snapshot</strong>, which
+images the whole <abbr title="Virtual Machine">VM</abbr> including the Docker volume that holds the data. Crude, but a fine
+belt-and-suspenders layer on top of dumps.</p>
+<p>One more scope of "roll back" that costs nothing: inside a transaction,
+<code>SAVEPOINT</code> / <code>ROLLBACK TO SAVEPOINT</code> ≈ <abbr title="Transact-SQL — SQL Server's dialect of SQL">T-SQL</abbr>'s
+<code>SAVE TRANSACTION</code>. And this app gets request-scale rollback structurally — the
+one-transaction-per-request teardown from page 2 means any failed request undoes
+<em>everything</em> it did, automatically.</p>
+
+<h2>Who, what, when — the audit question</h2>
+<p>Three layers, from generic to the one this project ships:</p>
+<h3>Statement logging and pgAudit</h3>
+<p>Postgres can log every statement (<code>log_statement = 'all'</code>, with
+<code>log_line_prefix</code> adding user, database, and timestamp). The
+<strong>pgAudit</strong> extension does it properly for compliance: structured audit records
+of who ran what, filterable by command type or table (≈ <abbr title="Structured Query Language">SQL</abbr> Server Audit). This answers
+who/what/when — but it is a trail to read, not a mechanism to undo.</p>
+<h3>History tables — what you would add</h3>
+<p><abbr title="Structured Query Language">SQL</abbr> Server's best tool here is system-versioned temporal tables
+(<code>FOR SYSTEM_TIME AS OF</code>). Postgres has no built-in equivalent; the standard
+pattern is a generic trigger that writes each row's OLD/NEW images as <abbr title="JSON Binary — Postgres's binary-stored, indexable JSON column type">JSONB</abbr> into an
+append-only audit table. From that, "apply their opposite" is mechanical: restore the OLD
+image. If an interviewer asks what you'd add to make the <abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> correction-proof, this is the
+answer — one generic trigger, applied to every table, about a day of work.</p>
+<div class="warn">
+The <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> is not an undo log. <abbr title="Structured Query Language">SQL</abbr> Server people sometimes reach for <code>fn_dblog</code>;
+the Postgres analogs (<code>pg_waldump</code>, logical decoding — the <abbr title="Change Data Capture — streaming every row change out of the database as events">CDC</abbr> hook that tools
+like Debezium use) let you <em>inspect</em> every change, but no relational database gives
+you "reverse transaction 4127." Undo is always either <em>restore</em> (<abbr title="Point-In-Time Recovery — rebuilding a database as of an exact moment by replaying the transaction log">PITR</abbr> to just
+before) or <em>compensate</em> (apply the opposite operation). Design for the second and
+you rarely need the first.
+</div>
+<h3>The ledger this schema already has — lead with this</h3>
+<p>For the data that actually matters in an <abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> — inventory — the schema <em>is</em> the
+audit log. <code>stock_movements</code> is append-only, and every row carries
+<code>user_id</code> (who), <code>created_at</code> (when), <code>reason</code> and
+<code>ref_type</code>/<code>ref_id</code> (why — which work order, purchase order, or sale),
+and <code>qty_delta</code> (what). Because <code>apply_movement()</code> is the only writer
+of stock, the correction mechanism falls out of the design: <strong>a mistake is undone by a
+compensating movement</strong> — a mistaken +50 receipt is corrected by posting a −50
+adjustment with a note, through the same validated, locked, audited code path. History is
+never edited; the trail shows both the mistake and the fix, like a ledger in accounting.</p>
+<div class="talk">
+<em>"Nobody UPDATEs history in this schema. Inventory is a balance plus an append-only
+ledger; corrections are reversing entries posted by the same service that posted the
+original, so the audit trail is complete by construction — and a reconciliation test proves
+the balance equals the sum of the ledger at all times."</em> That is architecture doing what
+most shops bolt on with tooling. Its honest limit: the ledger covers stock; auditing edits
+to names, prices, and document fields would need the trigger-based history layer above.
+</div>
+
+<h2>Decoupling backups from the database</h2>
+<p>The principle to state plainly: <strong>a backup on the same disk as the database is not
+a backup.</strong> The droplet dying, being compromised, or being fat-fingered takes both.
+The standard is 3-2-1 — three copies, two kinds of media, one off-site. The practical
+version for this deployment:</p>
+<pre><code># nightly cron on the droplet: dump straight to S3-compatible object storage
+# (DigitalOcean Spaces, ~$5/mo) without ever touching the local disk
+docker compose -f docker-compose.prod.yml exec db pg_dump -U erp -Fc erp \
+  | rclone rcat spaces:erp-backups/erp-$(date +\%F).dump
+</code></pre>
+<ul>
+  <li><strong>For <abbr title="Point-In-Time Recovery — rebuilding a database as of an exact moment by replaying the transaction log">PITR</abbr></strong>, pgBackRest and wal-g speak <abbr title="Simple Storage Service — Amazon's object storage; S3-compatible services speak the same API">S3</abbr> natively — base backups and every
+  <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> segment stream to the bucket continuously.</li>
+  <li><strong>Harden the decoupling</strong>: give the droplet <em>write-only</em> credentials
+  (it can add backups, never delete them — so a compromised server cannot destroy history),
+  turn on bucket versioning or a retention lock, and prefer a different region than the
+  droplet's.</li>
+  <li><strong>Rotate</strong>: keep dailies for two weeks, weeklies for a few months — object
+  storage lifecycle rules do this automatically.</li>
+</ul>
+<div class="warn">
+A backup that has never been restored is a hope, not a backup. Schedule a periodic test
+restore into a scratch database (<code>CREATE DATABASE erp_verify</code>, restore, sanity-check
+row counts) — the failure mode this catches is the one where the cron job has been silently
+producing empty dumps for six months.
+</div>
+
+<h2>The mapping table</h2>
+<div class="table-scroll">
+<table>
+  <tr><th><abbr title="Structured Query Language">SQL</abbr> Server</th><th>PostgreSQL</th></tr>
+  <tr><td><code>BACKUP DATABASE</code> (.bak)</td><td><code>pg_dump -Fc</code> (logical) / <code>pg_basebackup</code> (physical)</td></tr>
+  <tr><td>Transaction log + log backups</td><td><abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> + continuous archiving (pgBackRest / wal-g)</td></tr>
+  <tr><td><code>RESTORE ... WITH STOPAT</code></td><td><abbr title="Point-In-Time Recovery — rebuilding a database as of an exact moment by replaying the transaction log">PITR</abbr> with <code>recovery_target_time</code></td></tr>
+  <tr><td><code>CREATE DATABASE ... AS SNAPSHOT</code></td><td>none — filesystem/<abbr title="Virtual Machine">VM</abbr> snapshot instead</td></tr>
+  <tr><td><abbr title="Structured Query Language">SQL</abbr> Server Audit</td><td>pgAudit extension</td></tr>
+  <tr><td>Temporal tables (<code>FOR SYSTEM_TIME</code>)</td><td>none built in — trigger-based history tables</td></tr>
+  <tr><td><code>fn_dblog</code>, <abbr title="Change Data Capture — streaming every row change out of the database as events">CDC</abbr></td><td><code>pg_waldump</code>, logical decoding</td></tr>
+  <tr><td><code>SAVE TRANSACTION</code></td><td><code>SAVEPOINT</code> / <code>ROLLBACK TO SAVEPOINT</code></td></tr>
+</table>
+</div>
+
+<div class="talk">
+Closing honesty, which is itself a selling point: the demo's README documents "no backups"
+as an accepted scope cut — <code>flask seed</code> rebuilds the demo world in seconds, so
+backups would be theater <em>for this deployment</em>. Being able to say that, and then lay
+out this exact ladder — nightly dumps → <abbr title="Write-Ahead Log — Postgres's transaction log: every change is recorded here before the data files are touched">WAL</abbr> archiving → off-site object storage with
+write-only credentials → compensating-entry corrections — shows you distinguish between a
+demo's needs and a business's, which is precisely the judgment an in-house-<abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> shop is
+hiring for.
+</div>
+
+<div class="pager">
+  <a href="07-testing-deploy.html">← 7. Tests &amp; deploy</a>
+  <a href="index.html">0. Overview →</a>
+</div>
+
+</main>
+</body>
+</html>

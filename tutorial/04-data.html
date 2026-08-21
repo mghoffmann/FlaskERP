@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4. Data &amp; migrations — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html" aria-current="page">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>Defining data: SQLAlchemy models and Alembic migrations</h1>
+<p class="subtitle"><abbr title="Entity Framework — .NET's ORM">EF</abbr> Core code-first, translated. Same workflow, more explicit transaction control.</p>
+
+<h2>A model class, side by side with your mental <abbr title="Entity Framework — .NET's ORM">EF</abbr> entity</h2>
+<p>All 11 tables live in <code>app/models.py</code>. Here is the central one, <code>Part</code>,
+lightly trimmed:</p>
+<pre><code>class Part(TimestampedModel):                      # base adds id, created_at, updated_at
+    __tablename__ = "parts"
+    __table_args__ = (
+        sa.CheckConstraint("part_type IN ('raw', 'finished')", name="part_type_valid"),
+        sa.CheckConstraint("qty_on_hand &gt;= 0", name="qty_on_hand_non_negative"),
+    )
+
+    sku:  Mapped[str] = mapped_column(sa.String(40), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    part_type: Mapped[str] = mapped_column(sa.String(20), nullable=False)
+    unit: Mapped[str] = mapped_column(sa.String(20), nullable=False, server_default="ea")
+    qty_on_hand: Mapped[Decimal] = mapped_column(
+        sa.Numeric(12, 2), nullable=False, server_default="0"
+    )
+    reorder_point: Mapped[Decimal] = mapped_column(sa.Numeric(12, 2), nullable=False, server_default="0")
+    unit_cost:     Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), nullable=False, server_default="0")
+    active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.true())
+
+    # navigation property: BOM lines where this part is the product
+    bom_lines: Mapped[list["BomLine"]] = relationship(
+        foreign_keys="BomLine.product_part_id", back_populates="product"
+    )
+</code></pre>
+<div class="table-scroll">
+<table>
+  <tr><th><abbr title="Entity Framework — .NET's ORM">EF</abbr> Core</th><th>SQLAlchemy 2</th></tr>
+  <tr><td><code>public string Sku { get; set; }</code> + fluent <code>HasMaxLength(40)</code></td><td><code>sku: Mapped[str] = mapped_column(sa.String(40), ...)</code> — annotation and column config in one line</td></tr>
+  <tr><td><code>decimal</code> property + <code>HasPrecision(12, 2)</code></td><td><code>Mapped[Decimal]</code> + <code>sa.Numeric(12, 2)</code> — hydrates to Python's exact <code>Decimal</code>, never float</td></tr>
+  <tr><td><code>HasDefaultValueSql("0")</code></td><td><code>server_default="0"</code> — the default lives in the database, not the class</td></tr>
+  <tr><td>Navigation property + <code>HasOne/WithMany</code></td><td><code>relationship(back_populates=...)</code> — both sides declared, linked by name</td></tr>
+  <tr><td><code>[Index(IsUnique = true)]</code> / fluent</td><td><code>unique=True</code> on the column</td></tr>
+  <tr><td>Base entity class for audit columns</td><td><code>TimestampedModel</code> mixin: <code>id</code> (BIGINT identity), <code>created_at</code>/<code>updated_at</code> (TIMESTAMPTZ, server-defaulted)</td></tr>
+</table>
+</div>
+<p>One deliberate schema-design point: constraint <em>names</em> are generated from a
+<code>naming_convention</code> dict on the metadata — so every <abbr title="Foreign Key">FK</abbr>/CHECK/unique constraint has a
+predictable name, which matters the day a migration needs to drop one. <abbr title="Entity Framework — .NET's ORM">EF</abbr> names constraints
+predictably by default; SQLAlchemy makes you opt in, and this project did.</p>
+
+<h2>The session: a <code>DbContext</code> with the lid off</h2>
+<p><code>db.session</code> is the unit-of-work object — it tracks loaded objects (identity map),
+collects your inserts/updates, and writes them when told. The verbs differ from <abbr title="Entity Framework — .NET's ORM">EF</abbr> in one
+important way:</p>
+<div class="table-scroll">
+<table>
+  <tr><th><abbr title="Entity Framework — .NET's ORM">EF</abbr> Core</th><th>SQLAlchemy</th><th>What it does</th></tr>
+  <tr><td><code>context.Parts.Find(42)</code></td><td><code>db.session.get(Part, 42)</code></td><td><abbr title="Primary Key">PK</abbr> lookup, identity-map first.</td></tr>
+  <tr><td><code>context.Parts.Where(p =&gt; p.Active).ToList()</code></td><td><code>db.session.scalars(select(Part).where(Part.active)).all()</code></td><td>Composable query. <code>select()</code> expressions ≈ <abbr title="Language Integrated Query">LINQ</abbr> expression trees.</td></tr>
+  <tr><td><code>context.Add(part)</code></td><td><code>db.session.add(part)</code></td><td>Start tracking a new object.</td></tr>
+  <tr><td><em>(automatic change tracking)</em></td><td><em>(automatic change tracking)</em></td><td>Mutate a loaded object's attribute; both notice by themselves.</td></tr>
+  <tr><td><code>SaveChanges()</code></td><td><code>db.session.flush()</code></td><td>Sends the <abbr title="Structured Query Language">SQL</abbr>, populates generated IDs — <strong>but does not commit</strong>.</td></tr>
+  <tr><td><code>transaction.Commit()</code></td><td><code>db.session.commit()</code></td><td>Makes it durable. In this app, called <em>only</em> by the request-teardown hook.</td></tr>
+</table>
+</div>
+<div class="warn">
+The flush/commit split is the number-one <abbr title="Entity Framework — .NET's ORM">EF</abbr>-to-SQLAlchemy adjustment. <abbr title="Entity Framework — .NET's ORM">EF</abbr>'s
+<code>SaveChanges()</code> commits immediately (unless you opened an explicit transaction);
+SQLAlchemy's session is <em>always</em> inside an open transaction, and <code>flush()</code> just
+pushes <abbr title="Structured Query Language">SQL</abbr> into it. This project turns that into a rule: services and routes may
+<code>flush()</code> (e.g. to get a new work order's ID for its movement rows) but never
+<code>commit()</code> — the teardown hook owns the commit. One request, one transaction, enforced
+structurally.
+</div>
+
+<h2>Migrations: <code>Add-Migration</code> → <code>flask db migrate</code></h2>
+<p>Alembic (wrapped by Flask-Migrate) is <abbr title="Entity Framework — .NET's ORM">EF</abbr> Migrations with the same three-beat workflow:</p>
+<pre><code># 1. change the model classes in app/models.py, then autogenerate a migration:
+flask db migrate -m "add reorder_point to parts"     # ≈ Add-Migration AddReorderPoint
+
+# 2. REVIEW the generated file in migrations/versions/ — autogenerate is a draft,
+#    not a decision. (Same discipline as reviewing an EF migration before committing.)
+
+# 3. apply it:
+flask db upgrade                                     # ≈ Update-Database
+</code></pre>
+<p>A generated migration is a Python file with <code>upgrade()</code>/<code>downgrade()</code>
+functions of imperative schema operations — the same shape as an <abbr title="Entity Framework — .NET's ORM">EF</abbr> migration's
+<code>Up()</code>/<code>Down()</code>:</p>
+<pre><code>def upgrade():
+    op.add_column("parts",
+        sa.Column("reorder_point", sa.Numeric(12, 2),
+                  server_default="0", nullable=False))
+
+def downgrade():
+    op.drop_column("parts", "reorder_point")
+</code></pre>
+<p>Three project-specific practices worth knowing:</p>
+<ul>
+  <li><strong><code>migrations/env.py</code> must import the models.</strong> Autogenerate works by
+  diffing the live database against the model metadata; if nothing imports
+  <code>app/models.py</code>, the metadata is empty and autogenerate cheerfully generates
+  "drop every table". (<abbr title="Entity Framework — .NET's ORM">EF</abbr> avoids this because the <code>DbContext</code> names its sets.)</li>
+  <li><strong><code>flask db check</code> runs in <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr>.</strong> It fails the build if the models have
+  drifted from the migration chain — i.e. someone edited a model and forgot to generate the
+  migration. This is the guard <abbr title="Entity Framework — .NET's ORM">EF</abbr> users approximate with
+  <code>context.Database.GetPendingModelChanges()</code>-style checks.</li>
+  <li><strong>Production applies migrations at container start.</strong> The Docker entrypoint runs
+  <code>flask db upgrade</code> before starting gunicorn, so a deploy and its schema change are
+  one atomic event (≈ running <code>Database.Migrate()</code> at startup).</li>
+</ul>
+
+<h2>Seed data as a <abbr title="Command-Line Interface">CLI</abbr> command</h2>
+<p><code>flask seed</code> (in <code>app/cli.py</code>) creates the demo world: two users
+(admin/operator), raw and finished parts, a <abbr title="Bill of Materials — the list of component parts and quantities needed to build one unit of a product">BOM</abbr>, and documents in every interesting state —
+including a work order that is deliberately <em>short on components</em> and an in-transit
+purchase order that resolves the shortage, so the demo has a story. It is idempotent
+(create-if-missing), safe to run repeatedly, and does all inventory changes through the stock
+service like any other caller.</p>
+<div class="dotnet">≈ <abbr title="Entity Framework — .NET's ORM">EF</abbr>'s <code>HasData</code>, but imperative and able to express "documents
+mid-lifecycle", which declarative seeding is bad at. The idempotency requirement is the same
+one you'd impose on a .NET seeder that runs on every deploy.</div>
+
+<div class="talk">
+A crisp line for "how do you handle schema change?": <em>"Models are the source of truth;
+Alembic autogenerates a draft migration that I review like any other code; <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr> refuses to merge
+if models and migrations disagree; and production applies pending migrations at startup, so a
+deploy can never run new code against an old schema."</em> Every clause of that has an <abbr title="Entity Framework — .NET's ORM">EF</abbr>
+equivalent you already know — say both and you sound bilingual.
+</div>
+
+<div class="pager">
+  <a href="03-postgres.html">← 3. PostgreSQL</a>
+  <a href="05-api.html">5. The <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr> →</a>
+</div>
+
+</main>
+</body>
+</html>

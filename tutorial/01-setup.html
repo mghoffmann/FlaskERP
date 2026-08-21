@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1. Project setup — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html" aria-current="page">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>Setting up a new Flask project</h1>
+<p class="subtitle">From an empty folder to a running app with a Dockerized PostgreSQL — the equivalent of <code>dotnet new webapi</code>, done by hand.</p>
+
+<h2>Step 1 — a virtual environment</h2>
+<p>Python installs packages globally by default. A <strong>virtual environment</strong> (venv) is a
+private, per-project copy of the Python interpreter and its package folder, so two projects
+can pin different versions of the same library. Everything in this project runs from
+<code>.venv/</code>:</p>
+<pre><code># create it once (from the project root)
+python -m venv .venv
+
+# use it: either "activate" it in your shell...
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # Linux/macOS
+
+# ...or skip activation and call its executables directly:
+.venv\Scripts\python.exe -m pytest
+</code></pre>
+<div class="dotnet">
+There is no direct .NET equivalent because you never needed one: <abbr title="Microsoft Build Engine">MSBuild</abbr>/NuGet resolve
+packages per-project automatically. Think of a venv as "the <code>bin/</code> +
+<code>packages/</code> folder, but you must create it and point your shell at it explicitly."
+Forgetting to activate the venv (and using a system Python instead) is the classic
+Python-newcomer error — the equivalent of building against the wrong SDK.
+</div>
+
+<h2>Step 2 — dependencies in <code>requirements.txt</code></h2>
+<p>The Python analog of your <code>.csproj</code> <code>&lt;PackageReference&gt;</code> list is a flat
+text file. This project's, trimmed to the interesting lines:</p>
+<pre><code>flask~=3.1                 # the web framework
+flask-sqlalchemy~=3.1      # glue: binds SQLAlchemy sessions to the Flask app/request
+flask-migrate~=4.1         # glue: exposes Alembic as `flask db ...` commands
+sqlalchemy~=2.0            # the ORM itself
+alembic~=1.16              # schema migrations (EF Migrations equivalent)
+psycopg[binary]~=3.2       # PostgreSQL driver (like Microsoft.Data.SqlClient)
+gunicorn~=23.0             # production app server (the Kestrel role)
+python-dotenv~=1.1         # loads .env files
+pytest~=8.3                # test runner
+</code></pre>
+<pre><code>pip install -r requirements.txt     # ≈ dotnet restore
+</code></pre>
+<div class="dotnet">
+<code>~=3.1</code> is a "compatible release" pin — allows 3.1.x and 3.2, not 4.0. Same spirit
+as NuGet's floating versions, but the convention in Python is to commit the pins in the repo
+rather than a lock file (lock files exist — <code>pip freeze</code>, poetry, uv — but a small
+project doesn't need them). Note the <em>two</em> <abbr title="Object-Relational Mapper — maps database rows to objects (Entity Framework, SQLAlchemy)">ORM</abbr> lines: <code>sqlalchemy</code> is the <abbr title="Object-Relational Mapper — maps database rows to objects (Entity Framework, SQLAlchemy)">ORM</abbr>,
+<code>flask-sqlalchemy</code> is a thin integration that scopes a session to each web request.
+<abbr title="Entity Framework — .NET's ORM">EF</abbr> Core bundles both roles in one package.
+</div>
+
+<h2>Step 3 — the smallest possible Flask app</h2>
+<p>Flask's hello-world is famously five lines, and understanding them makes everything else legible:</p>
+<pre><code>from flask import Flask
+
+app = Flask(__name__)          # the application object — like WebApplication in Program.cs
+
+@app.route("/health")          # decorator = attribute routing: [HttpGet("/health")]
+def health():                  # a "view function" — the action method
+    return {"status": "ok"}    # returning a dict auto-serializes to JSON
+</code></pre>
+<p>This project does <em>not</em> put <code>app = Flask(__name__)</code> at module level, though.
+It wraps creation in a function — the <strong>application factory</strong>, covered in depth on
+the <a href="02-flask-anatomy.html">next page</a> — so tests, dev, and prod can each build their own
+differently-configured instance. That decision was made on day one because retrofitting it later
+touches everything.</p>
+
+<h2>Step 4 — configuration and <code>.env</code></h2>
+<p>Configuration is environment variables, loaded from a git-ignored <code>.env</code> file in
+dev (the committed <code>.env.example</code> documents every variable). The important ones:</p>
+<pre><code>FLASK_APP=app                # which package holds create_app() — used by the `flask` CLI
+FLASK_CONFIG=development     # which config class to load (development/testing/production)
+DATABASE_URL=postgresql+psycopg://erp:erp@db:5432/erp
+SECRET_KEY=...               # signs the session cookie (like machine key / Data Protection)
+</code></pre>
+<div class="dotnet">
+The mapping: <code>.env</code> ≈ user-secrets + <code>appsettings.Development.json</code>;
+<code>FLASK_CONFIG</code> ≈ <code>ASPNETCORE_ENVIRONMENT</code>; the config classes in
+<code>app/config.py</code> ≈ the strongly-typed Options pattern. One nicety carried over from
+.NET habits: <code>ProductionConfig.__init__</code> <em>refuses to start</em> without a real
+<code>SECRET_KEY</code>, the way a well-configured ASP.NET app fails fast on missing config.
+</div>
+<div class="warn">
+<code>DATABASE_URL</code>'s host is <code>db</code> when the app runs inside docker-compose
+(service names are <abbr title="Domain Name System — maps domain names to server IP addresses">DNS</abbr> names on the compose network) but <code>localhost</code> when you run
+Flask directly on your machine against the container's published port. Half of all
+"cannot connect to database" moments in this stack are this line.
+</div>
+
+<h2>Step 5 — PostgreSQL via Docker Compose</h2>
+<p>No local database install. Dev runs Postgres in a container, declared once in
+<code>docker-compose.yml</code>:</p>
+<pre><code>services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp
+      POSTGRES_DB: erp
+    ports:
+      - "5432:5432"        # published so host tools (psql, pytest) can reach it
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # named volume = data survives restarts
+</code></pre>
+<pre><code>docker compose up -d db      # start just the database, in the background
+</code></pre>
+<div class="dotnet">
+Equivalent to running <abbr title="Structured Query Language">SQL</abbr> Server in a container instead of installing LocalDB — one
+command, disposable, identical on every developer's machine and in <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr>. The named volume is
+the part people miss: containers are throwaway, so the data directory is mounted from a
+Docker-managed volume that outlives them.
+</div>
+
+<h2>Step 6 — run it</h2>
+<pre><code>flask run --debug            # ≈ dotnet run + hot reload + developer exception page
+</code></pre>
+<p>The <code>flask</code> <abbr title="Command-Line Interface">CLI</abbr> finds <code>create_app()</code> via <code>FLASK_APP=app</code>, builds
+the app, and serves it on <code>http://localhost:5000</code> with auto-reload on file changes.
+In this project you normally don't even do that by hand — <code>docker compose up</code> starts
+db + app together, with the source bind-mounted into the container so edits reload live.</p>
+
+<h2>What existed at the end of phase 1</h2>
+<ul>
+  <li>The folder layout from the overview page, with an <code>app/</code> package and empty <code>api/</code>.</li>
+  <li><code>create_app()</code> serving a static <code>index.html</code>, with <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> error handlers already in place.</li>
+  <li>Config classes for development / testing / production.</li>
+  <li>A Dockerized Postgres and a <code>.env</code> wiring the two together.</li>
+  <li>Agent tooling: <code>scripts/t.py</code> (test runner) and <code>scripts/db.py</code> (database lifecycle).</li>
+</ul>
+<div class="talk">
+"I set up the error-handling contract and the config discipline <em>before</em> any feature
+code" is a strong architectural statement — it means every endpoint written later inherited a
+consistent <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> error envelope and fail-fast production config for free, instead of those
+being retrofitted.
+</div>
+
+<div class="pager">
+  <a href="index.html">← 0. Overview</a>
+  <a href="02-flask-anatomy.html">2. Flask anatomy →</a>
+</div>
+
+</main>
+</body>
+</html>

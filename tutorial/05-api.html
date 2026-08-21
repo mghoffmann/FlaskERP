@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>5. The JSON API — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html" aria-current="page">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>Displaying and modifying data: the <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr></h1>
+<p class="subtitle">Routes, hand-rolled validation, document state machines, and the one service that guards the business invariant.</p>
+
+<h2>Reading data: list and detail endpoints</h2>
+<p>Every module follows the same pattern. A list endpoint with query-string filters, and a
+detail endpoint by ID:</p>
+<pre><code>@bp.get("/parts")
+@require_login()
+def list_parts():
+    query = select(Part)
+    part_type = request.args.get("type")          # ?type=raw   (≈ [FromQuery])
+    if part_type:
+        query = query.where(Part.part_type == part_type)
+    search = request.args.get("q")
+    if search:
+        query = query.where(or_(Part.sku.ilike(f"%{search}%"),
+                                Part.name.ilike(f"%{search}%")))
+    parts = db.session.scalars(query.order_by(Part.sku)).all()
+    return {"parts": [part_to_dict(p) for p in parts]}
+</code></pre>
+<div class="dotnet">
+The visible difference from ASP.NET: <strong>no model binding and no automatic <abbr title="Data Transfer Object — a shape defined just for the wire, instead of exposing database entities">DTO</abbr>
+serialization</strong>. <code>request.args</code> is the raw query string; the response is a dict
+you build via an explicit <code>part_to_dict()</code> mapper (the AutoMapper role, written by
+hand). One function per entity defines the wire shape — <code>user_to_dict</code> pointedly
+excludes <code>password_hash</code>, the same reason you use <abbr title="Data Transfer Object — a shape defined just for the wire, instead of exposing database entities">DTOs</abbr> instead of returning <abbr title="Entity Framework — .NET's ORM">EF</abbr>
+entities. <code>ilike</code> is case-insensitive LIKE — needed because Postgres string
+comparison is case-sensitive, unlike typical <abbr title="Structured Query Language">SQL</abbr> Server collations.
+</div>
+
+<h2>Writing data: validation by hand</h2>
+<p>Flask has no DataAnnotations. Input validation is explicit code, and the architecture doc
+fixes the error contract so every endpoint fails the same way:</p>
+<pre><code>@bp.post("/parts")
+@require_login(role="admin")
+def create_part():
+    data = get_json_or_400()                      # 400 if body isn't valid JSON
+    field_errors = {}
+    sku = (data.get("sku") or "").strip()
+    if not sku:
+        field_errors["sku"] = "SKU is required."
+    elif db.session.scalar(select(Part).where(Part.sku == sku)):
+        field_errors["sku"] = "SKU already exists."
+    if data.get("part_type") not in ("raw", "finished"):
+        field_errors["part_type"] = "Must be 'raw' or 'finished'."
+    if field_errors:
+        raise ApiError(400, "validation_error", "Invalid part.", field_errors=field_errors)
+
+    part = Part(sku=sku, ...)
+    db.session.add(part)
+    db.session.flush()                            # populate part.id — still uncommitted
+    return part_to_dict(part), 201
+</code></pre>
+<div class="dotnet">
+<code>field_errors</code> ≈ <code>ModelState</code>; <code>raise ApiError(...)</code> ≈ returning
+<code>ValidationProblem(ModelState)</code>. For documents with line items, errors use a
+<code>details</code> list of <code>{line, field, message}</code> — the same idea as ModelState keys
+like <code>Lines[2].Qty</code>, just as structured data. Libraries exist to get attribute-style
+validation in Python (pydantic, marshmallow); this project skipped them deliberately — at this
+size, explicit code is shorter than the abstraction and shows exactly what is checked.
+</div>
+
+<h2>Documents are state machines</h2>
+<p>Work orders, purchase orders, and sales orders each have a small fixed lifecycle, e.g.
+purchase orders: <code>draft → ordered → received</code>, with <code>cancelled</code> reachable
+before receipt. Mutations are <em>action endpoints</em>, not generic updates:</p>
+<pre><code>POST /api/purchase-orders/7/order       # draft   -&gt; ordered
+POST /api/purchase-orders/7/receive     # ordered -&gt; received   (this one moves stock)
+POST /api/work-orders/3/complete        # released -&gt; done      (consumes + produces stock)
+</code></pre>
+<p>An action from the wrong state returns <code>409</code> with code
+<code>invalid_transition</code> — the transition table lives in one place per module and is
+tested exhaustively. This is why there is no <code>PATCH /purchase-orders/7 {status: ...}</code>:
+a status is a <em>consequence</em> of an action, never directly writable.</p>
+<div class="dotnet">Same reasoning as exposing <code>Approve()</code> on a <abbr title="Domain-Driven Design">DDD</abbr> aggregate instead
+of a settable <code>Status</code> property. If you've argued for that in .NET, this is that
+argument, shipped.</div>
+
+<h2>The stock service: one writer, explicit locks</h2>
+<p>The core business invariant: <code>parts.qty_on_hand</code> must always equal the sum of that
+part's rows in the append-only <code>stock_movements</code> ledger. The enforcement is
+architectural — exactly one function in the codebase may change stock, and every module calls
+it:</p>
+<pre><code># app/services/stock.py — the ONLY writer of parts.qty_on_hand
+def apply_movement(part_id, qty_delta, reason, user_id,
+                   ref_type=None, ref_id=None, note=None):
+    # SELECT ... FOR UPDATE — row-lock the part until this request's
+    # transaction commits (≈ WITH (UPDLOCK) in T-SQL)
+    part = db.session.get(Part, part_id, with_for_update=True)
+
+    new_qty = part.qty_on_hand + qty_delta
+    if new_qty &lt; 0:
+        raise InsufficientStockError(part, required=-qty_delta,
+                                     on_hand=part.qty_on_hand)
+
+    part.qty_on_hand = new_qty                      # the balance...
+    db.session.add(StockMovement(                   # ...and its explanation,
+        part_id=part_id, qty_delta=qty_delta,       #    in the same flush —
+        reason=reason, user_id=user_id,             #    they can never diverge
+        ref_type=ref_type, ref_id=ref_id, note=note))
+    db.session.flush()                              # flush, never commit
+</code></pre>
+<p>Multi-part operations compose it. Completing a work order must consume every <abbr title="Bill of Materials — the list of component parts and quantities needed to build one unit of a product">BOM</abbr> component
+and produce the finished part, all-or-nothing:</p>
+<pre><code># work-order completion, condensed:
+lock_ids = sorted(component_part_ids + [product_part_id])   # global lock ORDER
+for pid in lock_ids:
+    db.session.get(Part, pid, with_for_update=True)          # lock ascending
+
+shortfalls = [c for c in components if on_hand(c) &lt; required(c)]
+if shortfalls:
+    raise ApiError(409, "insufficient_stock", ...,           # report ALL shortages,
+                   details=[...one per short part...])       # not just the first
+
+for c in components:
+    apply_movement(c.part_id, -required(c), "wo_consume", g.user.id, "wo", wo.id)
+apply_movement(product_part_id, wo.qty, "wo_produce", g.user.id, "wo", wo.id)
+wo.status = "done"
+</code></pre>
+<p>Three things to be able to explain about this code:</p>
+<ul>
+  <li><strong>Sorted locking prevents deadlocks.</strong> If completion locks parts
+  {3,7} ascending while a shipment locks {7,3} in its own order, they can deadlock. Everything
+  in this codebase locks part IDs ascending, so lock graphs can't cycle.</li>
+  <li><strong>Verify-all-then-write.</strong> Shortfalls are checked for every component before any
+  movement is written, so the 409 lists every missing part — one fix-and-retry round trip for
+  the user, not N.</li>
+  <li><strong>The ledger is auditable and reconcilable.</strong> <code>stock_movements</code> is
+  append-only with a polymorphic reference (<code>ref_type</code>/<code>ref_id</code> → the <abbr title="Work Order — an instruction to build N units of a finished part">WO</abbr>/<abbr title="Purchase Order — an order to buy parts from a supplier">PO</abbr>/<abbr title="Sales Order — a customer's order for finished parts">SO</abbr>
+  that caused it); a reconciliation check (asserted in tests) proves
+  <code>qty_on_hand == SUM(qty_delta)</code> at all times.</li>
+</ul>
+<div class="talk">
+This page is the interview centerpiece. The one-sentence version: <em>"Inventory is a
+denormalized balance plus an append-only ledger; one service function owns the pair, takes a
+row lock, and every business operation composes it inside the request's single transaction —
+so the balance and its history cannot diverge, concurrent writes cannot oversell, and
+multi-row operations lock in a global order so they cannot deadlock."</em> Every clause maps to
+a line of code you can point at.
+</div>
+
+<h2>How a request flows, end to end</h2>
+<pre><code>POST /api/work-orders/3/complete
+  → require_login() wrapper: session cookie → load User → g.user   (401/403 exit here)
+  → view function: validate state (409 invalid_transition exit)
+  → lock parts ascending, verify all components (409 insufficient_stock exit)
+  → apply_movement × N  (flushes, uncommitted)
+  → return JSON 200
+  → teardown_request: db.session.commit()          ← the ONLY commit
+     (any exception above instead rolls back EVERYTHING — no partial completion)
+</code></pre>
+
+<div class="pager">
+  <a href="04-data.html">← 4. Data &amp; migrations</a>
+  <a href="06-frontend.html">6. <abbr title="HyperText Markup Language">HTML</abbr> &amp; JavaScript →</a>
+</div>
+
+</main>
+</body>
+</html>

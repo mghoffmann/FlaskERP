@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2. Flask anatomy — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html" aria-current="page">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>The major parts of a Flask project</h1>
+<p class="subtitle">The application factory, blueprints, the request lifecycle, and error handling — mapped onto <code>Program.cs</code>, controllers, and middleware.</p>
+
+<h2>The application factory: <code>create_app()</code></h2>
+<p>Everything starts in <code>app/__init__.py</code>. Instead of a module-level global app, there
+is one function that builds and wires a fully-configured instance. Condensed from the real
+file:</p>
+<pre><code>def create_app(config_name=None):
+    config_name = config_name or os.environ.get("FLASK_CONFIG", "development")
+    config_class = config.get(config_name, DevelopmentConfig)
+
+    # static_url_path="" serves app/static/ at the site root, so
+    # app/static/parts.html is reachable at /parts.html
+    app = Flask(__name__, static_folder="static", static_url_path="")
+    app.config.from_object(config_class())
+
+    db.init_app(app)              # bind the shared SQLAlchemy object to THIS app
+    migrate.init_app(app, db)     # ...and Alembic
+
+    register_error_handlers(app)  # every error becomes the same JSON envelope
+    register_cli(app)             # the custom `flask seed` command
+
+    @app.teardown_request
+    def teardown_db_session(exception=None):
+        ...                       # one transaction per request — see below
+
+    from app.api.auth import bp as auth_bp
+    from app.api.inventory import bp as inventory_bp
+    # ... one import per module ...
+    for bp in [auth_bp, inventory_bp, bom_bp, work_orders_bp,
+               purchasing_bp, sales_orders_bp, dashboard_bp]:
+        app.register_blueprint(bp)
+
+    return app
+</code></pre>
+<div class="dotnet">
+This function is <code>Program.cs</code>. Line by line: <code>config.from_object()</code> ≈
+loading <code>appsettings.{env}.json</code>; the <code>init_app()</code> calls ≈
+<code>builder.Services.AddDbContext(...)</code>; <code>register_error_handlers</code> ≈
+<code>app.UseExceptionHandler</code> + ProblemDetails; the blueprint loop ≈
+<code>app.MapControllers()</code>. The reason it's a <em>function</em>: pytest calls
+<code>create_app("testing")</code> to get an isolated instance per run, the same way your
+integration tests use <code>WebApplicationFactory</code> to spin up a configured TestServer.
+</div>
+
+<h2>Extensions and the circular-import trap</h2>
+<p><code>app/extensions.py</code> is two lines: <code>db = SQLAlchemy(...)</code> and
+<code>migrate = Migrate()</code>, created <strong>unbound</strong> — not attached to any app yet.
+Models import <code>db</code> from there; the factory later binds it with
+<code>db.init_app(app)</code>.</p>
+<div class="dotnet">
+This is Flask's answer to a problem your <abbr title="Dependency Injection">DI</abbr> container solves invisibly. In ASP.NET,
+<code>DbContext</code> is registered once and constructor-injected everywhere, so there is no
+import cycle. Python has no container: models need <code>db</code>, routes need models, the
+app needs routes — if the app also <em>created</em> <code>db</code>, you would have a circular
+import. Creating extensions unbound in a leaf module, then binding late, breaks the cycle.
+It is the one piece of Flask boilerplate with no .NET counterpart, and knowing <em>why</em> it
+exists is a good depth signal.
+</div>
+
+<h2>Blueprints: controllers by another name</h2>
+<p>A <strong>blueprint</strong> is a named group of routes defined away from the app and registered
+onto it. Each module in <code>app/api/</code> declares one:</p>
+<pre><code>bp = Blueprint("inventory", __name__, url_prefix="/api")
+
+@bp.get("/parts")
+@require_login()
+def list_parts():
+    ...
+
+@bp.post("/parts")
+@require_login(role="admin")
+def create_part():
+    ...
+</code></pre>
+<div class="dotnet">
+<code>Blueprint("inventory", __name__, url_prefix="/api")</code> ≈ a controller class with
+<code>[Route("api/[controller]")]</code>. <code>@bp.get("/parts")</code> ≈
+<code>[HttpGet("parts")]</code>. The route handler is a plain function returning a dict (auto-<abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr>),
+a <code>(dict, status)</code> tuple, or a <code>Response</code> — where you would return
+<code>ActionResult&lt;T&gt;</code>.
+</div>
+
+<h2>The request lifecycle, and one-transaction-per-request</h2>
+<p>Flask's pipeline: match <abbr title="Uniform Resource Locator">URL</abbr> → run <code>before_request</code> hooks → run the view function →
+run <code>after_request</code> → run <code>teardown_request</code> <em>always</em>, even when the view
+raised. This project uses teardown to enforce a rule from the architecture doc — every request
+is exactly one database transaction:</p>
+<pre><code>@app.teardown_request
+def teardown_db_session(exception=None):
+    if exception is None:
+        try:
+            db.session.commit()      # request succeeded -> commit its transaction
+        except Exception:
+            db.session.rollback()
+            raise
+    else:
+        db.session.rollback()        # anything raised -> roll everything back
+    db.session.remove()              # fresh session for the next request
+</code></pre>
+<p>Consequence: route code <strong>never calls commit</strong>. Handlers and services mutate
+objects and call <code>db.session.flush()</code> when they need generated IDs; the commit happens
+in exactly one place, on the way out. An exception anywhere in a request — even one an error
+handler converted into a clean 409 response — rolls back <em>everything</em> that request did.</p>
+<div class="dotnet">
+This is the middleware-scoped-transaction pattern: like wrapping every request in a
+<code>TransactionScope</code> in a custom middleware, with <code>SaveChanges</code> forbidden in
+controllers. <code>flush()</code> ≈ <code>SaveChanges()</code> <em>inside an open transaction</em>
+(<abbr title="Structured Query Language">SQL</abbr> sent, IDs populated, nothing durable yet); the teardown commit ≈
+<code>transaction.Commit()</code>. More on this split on <a href="05-api.html">page 5</a>.
+</div>
+
+<h2><code>flask.g</code> — per-request state</h2>
+<p><code>g</code> is a scratch namespace Flask resets on every request. The auth decorator stores
+the loaded user there (<code>g.user</code>), so any code deeper in the call stack can read who is
+acting without the user being passed through every function signature.</p>
+<div class="dotnet">Direct equivalent: <code>HttpContext.Items</code>, or the
+<code>ClaimsPrincipal</code> on <code>HttpContext.User</code> for this specific use.</div>
+
+<h2>Decorators where .NET uses attributes: <code>require_login</code></h2>
+<p>Authorization is a decorator in <code>app/api/auth.py</code>, used two ways:
+<code>@require_login()</code> (any authenticated user) and <code>@require_login(role="admin")</code>.
+Its skeleton:</p>
+<pre><code>def require_login(role=None):                  # runs once, at decoration time
+    def decorator(view_func):                  # receives the route function
+        @functools.wraps(view_func)            # keep the function's name/metadata
+        def wrapper(*args, **kwargs):          # THIS runs on every request
+            user = ...load from session cookie...
+            if user is None:
+                raise ApiError(401, "unauthenticated", ...)
+            if role is not None and user.role != role:
+                raise ApiError(403, "forbidden", ...)
+            g.user = user                      # stash for the handler
+            return view_func(*args, **kwargs)
+        return wrapper
+    return decorator
+</code></pre>
+<div class="dotnet">
+<code>@require_login(role="admin")</code> ≡ <code>[Authorize(Roles = "admin")]</code>. The
+mechanics differ: an attribute is declarative metadata that ASP.NET's filter pipeline reads;
+a decorator literally <em>replaces the function</em> with a wrapper at import time. That's why
+it is three nested functions — the outer call captures <code>role</code>, the middle receives
+the view function, the inner is what Flask actually invokes per request.
+<code>functools.wraps</code> matters: Flask names routes after the function, so without it every
+wrapped view would be named "wrapper" and the second registration would collide.
+</div>
+
+<h2>One <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> error envelope for everything</h2>
+<p>The architecture doc's rule: <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr> consumers never receive <abbr title="HyperText Markup Language">HTML</abbr>, and every error has the same
+shape:</p>
+<pre><code>{ "error": { "code": "insufficient_stock",
+             "message": "Not enough stock to complete this work order.",
+             "field_errors": { "sku": "SKU already exists." },
+             "details": [ {"line": 2, "message": "..."} ] } }
+</code></pre>
+<p>Two mechanisms deliver it. Application code raises <code>ApiError(status, code, message, ...)</code>
+— a custom exception with a registered handler that serializes it. And for errors Flask raises
+on its own (404 route miss, 405 wrong verb, unhandled 500), <code>register_error_handlers()</code>
+maps each status to a default <code>ApiError</code> so even framework errors leave through the
+same door.</p>
+<div class="dotnet">
+Identical intent to ProblemDetails + an exception filter: exceptions as control flow for error
+responses, one serializer, no <abbr title="HyperText Markup Language">HTML</abbr> error pages leaking to an <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr> caller. <code>ApiError</code> ≈
+a custom exception + <code>IExceptionFilter</code> combo.
+</div>
+
+<h2>The <code>flask</code> <abbr title="Command-Line Interface">CLI</abbr> and custom commands</h2>
+<p><code>flask run</code>, <code>flask db upgrade</code> (from Flask-Migrate), and this project's
+custom <code>flask seed</code> — registered in <code>app/cli.py</code> — all run <em>inside an
+application context</em>, meaning config and database are available exactly as in a request.
+<code>flask seed</code> is idempotent: it creates the demo users/parts/documents only if missing,
+so it is safe to run on every deploy.</p>
+<div class="dotnet">≈ <code>dotnet run -- seed</code> with a custom <code>IHostedService</code>-style
+entry, or an <abbr title="Entity Framework — .NET's ORM">EF</abbr> <code>HasData</code> seeder — but as a first-class <abbr title="Command-Line Interface">CLI</abbr> verb.</div>
+
+<div class="talk">
+If asked "what surprised you about Flask coming from ASP.NET?", a grounded answer from this
+project: how much ASP.NET gives you that Flask makes explicit — no <abbr title="Dependency Injection">DI</abbr> container, no model
+binder, no <code>[Authorize]</code> — and that the explicitness cuts both ways: more boilerplate
+to write once (the factory, the decorator, the error handlers), but afterwards every behavior
+in the request path is code you can point at, not convention you have to know.
+</div>
+
+<div class="pager">
+  <a href="01-setup.html">← 1. Project setup</a>
+  <a href="03-postgres.html">3. PostgreSQL →</a>
+</div>
+
+</main>
+</body>
+</html>

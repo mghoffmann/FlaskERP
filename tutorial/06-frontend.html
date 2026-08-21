@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6. HTML &amp; JavaScript — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html" aria-current="page">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>How the <abbr title="HyperText Markup Language">HTML</abbr> and JavaScript relate to the Python</h1>
+<p class="subtitle">A deliberately framework-free frontend — what Angular gives you, done with the platform.</p>
+
+<h2>The architecture in one picture</h2>
+<pre><code>Angular world                        This project
+─────────────                        ────────────
+SPA: one index.html, client router   Multi-page: one real HTML file per screen
+Components + templates               One ES module per page (js/parts.js, js/part.js, ...)
+HttpClient + interceptors            fetch(), wrapped once in api()
+JWT in header, auth interceptor      Session cookie — browser attaches it automatically
+npm + webpack/vite build step        NO build step — files served exactly as written
+Angular sanitizes template bindings  el() helper builds DOM nodes; innerHTML banned
+</code></pre>
+<p>The relationship to Python is minimal by design: <strong>Flask serves the frontend as plain
+static files</strong> (<code>static_url_path=""</code> puts <code>app/static/parts.html</code> at
+<code>/parts.html</code>) <strong>and answers <code>fetch()</code> calls under
+<code>/api/*</code></strong>. There is no server-side templating — Flask never generates <abbr title="HyperText Markup Language">HTML</abbr>.
+Jinja (Flask's Razor) exists and is the classic Flask approach; this project deliberately
+skipped it, so the boundary between backend and frontend is a <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> contract, exactly like your
+Angular + Web <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr> projects — the frontend just isn't compiled.</p>
+
+<h2>Each page is: <abbr title="HyperText Markup Language">HTML</abbr> skeleton + one module</h2>
+<pre><code>&lt;!-- app/static/parts.html (trimmed) --&gt;
+&lt;body&gt;
+  &lt;header class="app-header"&gt;...shared nav, user chip...&lt;/header&gt;
+  &lt;main&gt;
+    &lt;div class="page-header-actions" data-role="admin"&gt;
+      &lt;button id="new-part-btn" class="btn"&gt;New part&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;table id="parts-table"&gt;...&lt;/table&gt;
+  &lt;/main&gt;
+  &lt;script type="module" src="/js/parts.js"&gt;&lt;/script&gt;
+&lt;/body&gt;
+</code></pre>
+<pre><code>// app/static/js/parts.js (shape of every page module)
+import { el, api, toast, qs, setQs, initShell } from "./app.js";
+
+const user = await initShell();          // auth check + shared header + role gating
+if (user) {                              // (no top-level return in ES modules)
+  main();
+}
+
+async function main() {
+  const data = await api("GET", "/api/parts" + location.search);
+  renderTable(data.parts);               // build rows with el(), append to the table
+  const newBtn = document.getElementById("new-part-btn");
+  if (newBtn) newBtn.addEventListener("click", openNewPartModal);   // null-guard! see below
+}
+</code></pre>
+<div class="dotnet">
+Map it to Angular: <code>app.js</code> ≈ the shared <code>CoreModule</code> +
+<code>AppComponent</code> shell; <code>initShell()</code> ≈ the auth guard + layout render;
+each page module ≈ a routed component's <code>ngOnInit</code>; and navigation between screens
+is real browser navigation (full page load) instead of client routing. For an <abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> where every
+screen is a fresh data fetch anyway, the <abbr title="Single-Page Application — one HTML shell, client-side routing; the Angular model">SPA</abbr> machinery buys little — that's the tradeoff
+argument for skipping the framework in a demo this size.
+</div>
+
+<h2><code>api()</code> — the HttpClient + interceptor, in 30 lines</h2>
+<p>Every request goes through one wrapper in <code>app.js</code> (real code, trimmed):</p>
+<pre><code>export async function api(method, path, body) {
+  const opts = { method, credentials: "same-origin", headers: {} };
+  if (body !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  if (res.status === 204) return null;
+  const payload = await res.json().catch(() =&gt; null);
+  if (res.ok) return payload;
+
+  if (res.status === 401 &amp;&amp; !location.pathname.endsWith("/login.html")) {
+    location.href = "/login.html";               // ≈ auth interceptor redirect
+  }
+  const errBody = (payload &amp;&amp; payload.error) || {};
+  throw new ApiError(res.status, errBody.code, errBody.message,
+                     errBody.field_errors, errBody.details);
+}
+</code></pre>
+<p>Callers get clean data or a typed <code>ApiError</code> carrying the backend's error envelope —
+so a form can map <code>field_errors</code> onto inputs and a 409 can show its
+<code>details</code> list. That's the client half of the error contract from page 2; the two were
+designed as one.</p>
+
+<h2>Authentication: the cookie does the work</h2>
+<p>Login is <code>POST /api/login</code>; Flask sets a <strong>signed session cookie</strong>
+(HttpOnly, Secure in prod). After that, the browser attaches it to every same-origin request
+automatically — no token storage, no Authorization header, no refresh logic.
+<code>initShell()</code> calls <code>GET /api/me</code> on page load: 200 means logged in
+(and returns <code>{id, username, role}</code>), 401 means <code>api()</code> redirects to the
+login page.</p>
+<div class="dotnet">
+≈ classic ASP.NET cookie authentication rather than the <abbr title="JSON Web Token — a signed token carrying identity claims; the common SPA auth method">JWT</abbr> pattern you'd use with Angular.
+Because the frontend and <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr> share one origin, <abbr title="Cross-Origin Resource Sharing — browser rules for calling an API on a different domain than the page">CORS</abbr> never comes up, and the usual reason for
+<abbr title="JSON Web Token — a signed token carrying identity claims; the common SPA auth method">JWTs</abbr> (multiple clients/origins) doesn't exist. The cookie is <em>signed</em> with
+<code>SECRET_KEY</code> (tamper-proof, contents readable-if-decoded like a <abbr title="JSON Web Token — a signed token carrying identity claims; the common SPA auth method">JWT</abbr>), holds only the
+user ID, and the user is re-loaded from the database per request — so a deactivated user dies
+on the next request, which stateless <abbr title="JSON Web Token — a signed token carrying identity claims; the common SPA auth method">JWTs</abbr> get wrong by default. Worth saying in the interview.
+</div>
+
+<h2>Role gating: the server enforces, the <abbr title="User Interface">UI</abbr> tidies</h2>
+<p>Admin-only controls are marked in <abbr title="HyperText Markup Language">HTML</abbr> with <code>data-role="admin"</code>. For operators,
+<code>initShell()</code> <strong>removes those nodes from the <abbr title="Document Object Model — the browser's live object tree of the current page">DOM</abbr> entirely</strong> (not just
+hides them). Authorization is still enforced server-side by
+<code>@require_login(role="admin")</code> — the <abbr title="Document Object Model — the browser's live object tree of the current page">DOM</abbr> removal is <abbr title="User Experience">UX</abbr>, not security; a devtools-savvy
+operator who re-creates the button still gets a 403.</p>
+<div class="warn">
+Removed-not-hidden gating has a sharp edge: page code that does
+<code>document.getElementById("edit-part-btn").addEventListener(...)</code> crashes for operators,
+because the element is <em>gone</em> and <code>getElementById</code> returned null — and one uncaught
+exception kills the module's whole <code>main()</code>, blanking the page. Every gated element
+reference must be null-guarded (<code>if (btn) btn.addEventListener(...)</code>). This exact bug
+shipped on the part-detail page and was fixed post-launch — an honest "a bug I shipped and what
+it taught me" story: the fix was the guard, the lesson is that role-dependent <abbr title="Document Object Model — the browser's live object tree of the current page">DOM</abbr> makes every
+element lookup conditional. Angular's <code>*ngIf</code> has the same removed-not-hidden
+semantics; the framework just prevents you from holding stale references to it.
+</div>
+
+<h2><code>el()</code> — safe <abbr title="Document Object Model — the browser's live object tree of the current page">DOM</abbr> building instead of templates</h2>
+<p>With no template engine, pages build <abbr title="Document Object Model — the browser's live object tree of the current page">DOM</abbr> with one helper (real code, trimmed):</p>
+<pre><code>export function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else if (key in node) node[key] = value;
+    else node.setAttribute(key, value);
+  }
+  for (const child of [].concat(children)) {
+    node.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+// usage — a table row for a part:
+el("tr", {}, [
+  el("td", {}, part.sku),
+  el("td", {}, part.name),
+  el("td", { class: "num" }, fmtQty(part.qty_on_hand)),
+])
+</code></pre>
+<p>Note the last line of the child loop: strings become <strong>text nodes</strong>, never markup.
+<code>innerHTML</code> with data in it is banned in this codebase — that one rule is the <abbr title="Cross-Site Scripting — an attack where user-supplied data ends up executing as script in the page">XSS</abbr>
+defense. A part named <code>&lt;img src=x onerror=...&gt;</code> renders as literal text.</p>
+<div class="dotnet">Angular gives you this for free — <code>{{ interpolation }}</code>
+auto-escapes and <code>[innerHTML]</code> goes through a sanitizer. Without a framework you must
+choose the safe primitive yourself; <code>el()</code> makes the safe way also the convenient way,
+which is the actual trick.</div>
+
+<h2>Deep-linkable state via the query string</h2>
+<p>Filters and searches round-trip through the <abbr title="Uniform Resource Locator">URL</abbr>: changing a filter calls
+<code>setQs({type: "raw"})</code> (History <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr>, no reload), and page load reads
+<code>location.search</code> to restore state — so a filtered view is a shareable, refreshable
+<abbr title="Uniform Resource Locator">URL</abbr>. ≈ Angular's <code>queryParams</code> + router navigation, done with two 10-line helpers.
+Modals are the native <code>&lt;dialog&gt;</code> element (<code>openFormModal()</code> in
+<code>modal.js</code>) — no Angular Material needed.</p>
+
+<div class="talk">
+The framing for "why no Angular/React?": <em>"It's a scope decision, not an ideology. Eight
+<abbr title="Create, Read, Update, Delete — the four basic data operations">CRUD</abbr>-ish screens, one shared shell, no offline or real-time requirements — a framework buys
+me a build pipeline and a dependency tree, and costs the reviewer the ability to open a .js
+file and read exactly what runs. For this size I chose the platform; I'd reach for a framework
+at the point of shared mutable client state across screens."</em> Knowing where the line is
+matters more than which side of it you stood on.
+</div>
+
+<div class="pager">
+  <a href="05-api.html">← 5. The <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr></a>
+  <a href="07-testing-deploy.html">7. Tests &amp; deploy →</a>
+</div>
+
+</main>
+</body>
+</html>

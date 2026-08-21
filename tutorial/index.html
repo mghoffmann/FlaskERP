@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0. Overview — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html" aria-current="page">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>How Shopfloor <abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> was built, from an empty folder</h1>
+<p class="subtitle">A walkthrough of the project for a developer fluent in <abbr title="Structured Query Language">SQL</abbr> Server, .NET, Entity Framework, and Angular.</p>
+
+<h2>What the app is (the 30-second tour)</h2>
+<p>Shopfloor <abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr> is a small manufacturing <abbr title="Enterprise Resource Planning — software running a company's core operations: inventory, orders, purchasing">ERP</abbr>: a factory buys <strong>raw parts</strong> from
+<strong>suppliers</strong> (purchase orders), builds <strong>finished parts</strong> from them according to a
+<strong>bill of materials</strong> (work orders), and sells the finished parts to <strong>customers</strong>
+(sales orders). Every change to inventory — a receipt, a build, a shipment, a manual
+adjustment — is one row in an append-only <code>stock_movements</code> ledger, and a
+<strong>dashboard</strong> summarizes open documents and low-stock parts. The demo story a reviewer
+can click through: receive the in-transit purchase order → the blocked work order becomes
+completable → complete it → ship the sales order → watch the dashboard numbers move.
+That loop touches every module, which is why it exists.</p>
+
+<h2>The method: plan first, then build in phases</h2>
+<p>Before any code, a planning session produced the 12 documents in <code>requirements/</code> —
+one architecture doc, one schema doc, one per feature module, plus testing and deployment.
+Each has explicit <em>acceptance criteria</em>. The build then followed the dependency order the
+docs themselves declare:</p>
+<table>
+  <tr><th>Phase</th><th>What gets built</th><th>Planning doc</th></tr>
+  <tr><td>1. Skeleton</td><td>Project layout, app factory, config, error envelope, Docker dev database</td><td>00-architecture</td></tr>
+  <tr><td>2. Schema</td><td>All 11 tables as SQLAlchemy models, the initial Alembic migration, <code>flask seed</code></td><td>01-database</td></tr>
+  <tr><td>3. Auth</td><td>Session login, <code>require_login</code> decorator, admin/operator roles</td><td>02-auth</td></tr>
+  <tr><td>4. Stock service</td><td><code>apply_movement()</code> — the single function allowed to change inventory</td><td>03-inventory</td></tr>
+  <tr><td>5. Modules</td><td>Inventory, <abbr title="Bill of Materials — the list of component parts and quantities needed to build one unit of a product">BOM</abbr>, work orders, purchasing, sales, dashboard — <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr> + pages</td><td>03–09</td></tr>
+  <tr><td>6. Tests + <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr></td><td>121 pytest tests against real Postgres; GitHub Actions</td><td>10-testing</td></tr>
+  <tr><td>7. Production</td><td>Prod compose file, Caddy <abbr title="Transport Layer Security — the encryption in HTTPS (successor to SSL)">TLS</abbr>, deploy runbook, <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr>-gated auto-deploy</td><td>11-deployment</td></tr>
+</table>
+
+<div class="talk">
+The strongest thing you can say about this project is not a Flask fact — it is the
+<em>process</em>: requirements with acceptance criteria came first, the build was phased along the
+dependency graph, every phase was gated by the test suite before its commits landed, and the
+commit history is granular enough to review each step in minutes. That is the same discipline
+as a .NET shop with a solution design doc and a <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr>-gated main branch — just executed with AI
+agents doing the typing and you directing and reviewing.
+</div>
+
+<h2>Rosetta stone: your stack → this stack</h2>
+<p>Almost everything in this project has a direct counterpart in the Microsoft ecosystem.
+Keep this table in your head and most of the codebase reads instantly:</p>
+<div class="table-scroll">
+<table>
+  <tr><th>You know</th><th>This project uses</th><th>One-line difference</th></tr>
+  <tr><td>ASP.NET Core (Web <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr>)</td><td><strong>Flask 3</strong></td><td>Micro-framework: no <abbr title="Dependency Injection">DI</abbr> container, no model binding — you add only what you need.</td></tr>
+  <tr><td>Entity Framework Core</td><td><strong>SQLAlchemy 2</strong></td><td>Same <abbr title="Object-Relational Mapper — maps database rows to objects (Entity Framework, SQLAlchemy)">ORM</abbr> ideas (change tracking, unit of work), but session/transaction control is more explicit.</td></tr>
+  <tr><td><abbr title="Entity Framework — .NET's ORM">EF</abbr> Migrations (<code>Add-Migration</code>)</td><td><strong>Alembic</strong> via Flask-Migrate (<code>flask db migrate</code>)</td><td>Same autogenerate-then-review workflow, migration files in Python.</td></tr>
+  <tr><td><abbr title="Structured Query Language">SQL</abbr> Server</td><td><strong>PostgreSQL 16</strong></td><td>Mostly renames; biggest real differences are <abbr title="Multi-Version Concurrency Control — every query sees a consistent snapshot; readers and writers don't block each other">MVCC</abbr> defaults and lock hints. See page 3.</td></tr>
+  <tr><td><abbr title="Language Integrated Query">LINQ</abbr> (<code>Where</code>, <code>FirstOrDefault</code>)</td><td>SQLAlchemy query <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr> (<code>select(...).where(...)</code>)</td><td>Built from composable expression objects instead of extension methods.</td></tr>
+  <tr><td><code>appsettings.{env}.json</code> + IConfiguration</td><td>Config classes + <code>.env</code> file</td><td>One Python class per environment; secrets via environment variables.</td></tr>
+  <tr><td>Built-in <abbr title="Dependency Injection">DI</abbr> container</td><td>Plain imports + <code>init_app()</code></td><td>Flask has no <abbr title="Dependency Injection">DI</abbr>; "services" are just modules you import.</td></tr>
+  <tr><td>Middleware pipeline</td><td><code>before_request</code> / <code>teardown_request</code> hooks</td><td>Same request-pipeline idea, registered as functions on the app.</td></tr>
+  <tr><td>Controllers / Areas</td><td><strong>Blueprints</strong> (one per module in <code>app/api/</code>)</td><td>A blueprint is a named group of routes registered onto the app.</td></tr>
+  <tr><td><code>[Authorize(Roles="admin")]</code></td><td><code>@require_login(role="admin")</code> decorator</td><td>Decorators are the Python idiom where .NET uses attributes + filters.</td></tr>
+  <tr><td>Kestrel behind <abbr title="Internet Information Services — Windows' built-in web server">IIS</abbr>/nginx</td><td><strong>gunicorn</strong> behind <strong>Caddy</strong></td><td>Same shape: app server behind a reverse proxy that owns <abbr title="Transport Layer Security — the encryption in HTTPS (successor to SSL)">TLS</abbr>.</td></tr>
+  <tr><td>xUnit + WebApplicationFactory</td><td><strong>pytest</strong> + Flask test client</td><td>Tests are plain functions; fixtures replace constructor injection.</td></tr>
+  <tr><td>NuGet + .csproj</td><td>pip + <code>requirements.txt</code></td><td>Flat pinned list; installed into a per-project virtual environment.</td></tr>
+  <tr><td>Angular <abbr title="Single-Page Application — one HTML shell, client-side routing; the Angular model">SPA</abbr></td><td>Static <abbr title="HyperText Markup Language">HTML</abbr> pages + one <abbr title="ECMAScript — the official standard behind JavaScript; ES modules are its native import/export system">ES</abbr> module each</td><td>No build step, no framework — deliberately. See page 6.</td></tr>
+  <tr><td><code>dotnet</code> <abbr title="Command-Line Interface">CLI</abbr></td><td><code>flask</code> <abbr title="Command-Line Interface">CLI</abbr> (+ custom <code>flask seed</code>)</td><td>Same idea; custom commands are registered in app code.</td></tr>
+</table>
+</div>
+
+<h2>The repository at a glance</h2>
+<pre><code>Camnetics/
+├── requirements/            # the 12 planning documents — the "spec"
+├── app/
+│   ├── __init__.py          # create_app() — the application factory
+│   ├── config.py            # Development / Testing / Production config classes
+│   ├── extensions.py        # shared db + migrate objects (created unbound)
+│   ├── models.py            # all 11 tables as SQLAlchemy models
+│   ├── errors.py            # ApiError + the JSON error envelope
+│   ├── cli.py               # `flask seed` custom command
+│   ├── services/stock.py    # THE stock service — sole writer of qty_on_hand
+│   ├── api/                 # one blueprint per module (auth, inventory, bom, ...)
+│   └── static/              # the whole frontend: HTML pages, js/, css/
+├── migrations/              # Alembic migration chain
+├── tests/                   # 121 pytest tests, run against real Postgres
+├── scripts/                 # t.py (test runner), db.py (db lifecycle) — agent tooling
+├── docker-compose.yml       # dev: Postgres + live-reload Flask
+├── docker-compose.prod.yml  # prod: Postgres + gunicorn + Caddy (TLS)
+└── .github/workflows/ci.yml # tests on every push; deploy to the droplet on green main
+</code></pre>
+
+<h2>How to read this walkthrough</h2>
+<p>The pages follow the build order. Each page teaches the concept, shows the real code from
+this repository, and contrasts it with the .NET/Angular way in the blue boxes. Green boxes
+are lines worth saying out loud in the interview. Orange boxes are traps.</p>
+<ol>
+  <li><a href="01-setup.html">Project setup</a> — empty folder to running Flask app with a Dockerized database.</li>
+  <li><a href="02-flask-anatomy.html">Flask anatomy</a> — the factory, config, blueprints, request lifecycle, error handling.</li>
+  <li><a href="03-postgres.html">PostgreSQL</a> — for the <abbr title="Structured Query Language">SQL</abbr> Server developer.</li>
+  <li><a href="04-data.html">Data &amp; migrations</a> — SQLAlchemy models and Alembic, versus <abbr title="Entity Framework — .NET's ORM">EF</abbr> Core.</li>
+  <li><a href="05-api.html">The <abbr title="JavaScript Object Notation — the text data format the API speaks">JSON</abbr> <abbr title="Application Programming Interface — here, the set of /api/ URLs the frontend calls to read and change data">API</abbr></a> — reading and writing data, validation, transactions, the stock service.</li>
+  <li><a href="06-frontend.html"><abbr title="HyperText Markup Language">HTML</abbr> &amp; JavaScript</a> — how the frontend talks to Python, versus Angular.</li>
+  <li><a href="07-testing-deploy.html">Tests &amp; deploy</a> — pytest, Docker, <abbr title="Continuous Integration / Continuous Deployment — automatically test every push, automatically release green builds">CI/CD</abbr>, production.</li>
+  <li><a href="08-backups.html">Backups &amp; audit</a> — snapshots, point-in-time recovery, audit trails, and off-site storage.</li>
+</ol>
+
+<div class="pager">
+  <span></span>
+  <a href="01-setup.html">1. Project setup →</a>
+</div>
+
+</main>
+</body>
+</html>

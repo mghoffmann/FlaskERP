@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>7. Tests &amp; deploy — Shopfloor ERP Walkthrough</title>
+<link rel="stylesheet" href="tutorial.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">Shopfloor ERP — From-Scratch Walkthrough</div>
+  <nav>
+    <a href="index.html">0. Overview</a>
+    <a href="01-setup.html">1. Project setup</a>
+    <a href="02-flask-anatomy.html">2. Flask anatomy</a>
+    <a href="03-postgres.html">3. PostgreSQL</a>
+    <a href="04-data.html">4. Data &amp; migrations</a>
+    <a href="05-api.html">5. The JSON API</a>
+    <a href="06-frontend.html">6. HTML &amp; JavaScript</a>
+    <a href="07-testing-deploy.html" aria-current="page">7. Tests &amp; deploy</a>
+    <a href="08-backups.html">8. Backups &amp; audit</a>
+  </nav>
+</header>
+<main>
+
+<h1>Testing, Docker, and deployment</h1>
+<p class="subtitle">121 tests against a real Postgres, a dev/prod compose split, and <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr> that blocks broken deploys.</p>
+
+<h2>pytest, for the xUnit developer</h2>
+<div class="table-scroll">
+<table>
+  <tr><th>xUnit / .NET</th><th>pytest / this project</th></tr>
+  <tr><td>Test classes + <code>[Fact]</code></td><td>Plain functions named <code>test_*</code> in <code>tests/test_*.py</code> — no classes, no attributes.</td></tr>
+  <tr><td><code>[Theory]</code> + <code>[InlineData]</code></td><td><code>@pytest.mark.parametrize</code> — used here to sweep every endpoint for 401/403.</td></tr>
+  <tr><td>Constructor injection / <code>IClassFixture</code></td><td><strong>Fixtures</strong>: a test asks for one by parameter <em>name</em>; pytest builds and injects it.</td></tr>
+  <tr><td><code>WebApplicationFactory</code> / TestServer</td><td><code>create_app("testing")</code> + Flask's built-in test client — in-process <abbr title="Hypertext Transfer Protocol">HTTP</abbr> without a socket.</td></tr>
+  <tr><td>Assert.Equal(...)</td><td>Plain <code>assert x == y</code> — pytest rewrites asserts to show both sides on failure.</td></tr>
+</table>
+</div>
+<p>The whole suite hangs off <code>tests/conftest.py</code> (a discovery-based shared-fixture
+file — think "fixtures visible to every test in this folder, no import needed"):</p>
+<pre><code># conftest.py, the load-bearing parts:
+
+@pytest.fixture(scope="session")
+def app():                                   # one app for the whole run
+    app = create_app("testing")              # points at the erp_test database
+    with app.app_context():
+        db.drop_all(); db.create_all()       # fresh schema once per run
+    yield app
+
+@pytest.fixture(autouse=True)                # autouse = wraps EVERY test
+def _isolated_db(app):
+    yield                                    # test runs here...
+    ...TRUNCATE all tables RESTART IDENTITY CASCADE...   # ...then full reset
+
+@pytest.fixture
+def admin_client(app, ...):                  # a logged-in test client
+    client = app.test_client()
+    client.post("/api/login", json={"username": "admin", "password": ...})
+    return client                            # carries the session cookie afterwards
+</code></pre>
+<p>Two testing decisions worth defending out loud:</p>
+<ul>
+  <li><strong>Real Postgres, not SQLite or mocks.</strong> The code under test leans on
+  <code>CHECK</code> constraints, <code>FOR UPDATE</code> locking, and <code>NUMERIC</code>
+  semantics — exactly the things a substitute database fakes differently. Same argument as
+  refusing <abbr title="Entity Framework — .NET's ORM">EF</abbr>'s InMemory provider for anything with transactions.</li>
+  <li><strong>TRUNCATE between tests, not transaction-rollback isolation.</strong> The usual trick
+  (run each test in a rolled-back transaction) is impossible here <em>because the app genuinely
+  commits</em> — the teardown hook from page 2 is part of what's being tested. So each test runs
+  against the real commit path, and the autouse fixture wipes all tables afterwards.</li>
+</ul>
+<p>Coverage highlights across the 121: the parametrized <strong>auth sweep</strong> (every
+endpoint × anonymous and wrong-role, so forgetting a <code>@require_login</code> fails <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr>),
+state-machine transition tables, insufficient-stock with multi-part shortfall details,
+ledger reconciliation (<code>qty_on_hand == SUM(qty_delta)</code>), and seed idempotency.</p>
+
+<h2>Docker: dev and prod are the same stack, differently dressed</h2>
+<p>One <code>Dockerfile</code> builds the app image for both. The two compose files differ only
+in posture:</p>
+<div class="table-scroll">
+<table>
+  <tr><th></th><th><code>docker-compose.yml</code> (dev)</th><th><code>docker-compose.prod.yml</code></th></tr>
+  <tr><td>Services</td><td>db + app</td><td>db + app + <strong>caddy</strong></td></tr>
+  <tr><td>App runs</td><td>source bind-mounted, <code>flask run --debug</code> (live reload)</td><td>the image as built, gunicorn with 2 workers — no debugger, no reload</td></tr>
+  <tr><td>Ports published</td><td>5432 (for host psql/pytest) and 5000</td><td><strong>only 80/443 on Caddy</strong> — db and app are unreachable from outside</td></tr>
+  <tr><td>Data volume</td><td><code>pgdata</code></td><td><code>pgdata_prod</code> (distinct name — can never collide with dev)</td></tr>
+</table>
+</div>
+<p>The image's entrypoint encodes the boot contract: wait for Postgres → <code>flask db
+upgrade</code> (apply pending migrations) → <code>exec gunicorn</code>. Every service has
+<code>restart: unless-stopped</code>, so a droplet reboot brings the whole stack back with no
+operator action.</p>
+<div class="dotnet">
+gunicorn is the Kestrel of this stack: a production <abbr title="Web Server Gateway Interface — the standard contract between Python web apps and app servers (gunicorn speaks it)">WSGI</abbr> server running N worker
+<em>processes</em> (Python's <abbr title="Global Interpreter Lock — CPython runs one thread of Python at a time, so Python scales with processes">GIL</abbr> makes multi-process the scaling unit where .NET uses threads).
+Caddy plays the <abbr title="Internet Information Services — Windows' built-in web server">IIS</abbr>/nginx reverse-proxy role with one superpower: given a real domain, it
+obtains and renews Let's Encrypt certificates automatically — the entire <abbr title="Transport Layer Security — the encryption in HTTPS (successor to SSL)">TLS</abbr> story is two
+lines of Caddyfile.
+</div>
+
+<h2><abbr title="Continuous Integration / Continuous Deployment — automatically test every push, automatically release green builds">CI/CD</abbr>: GitHub Actions</h2>
+<p><code>.github/workflows/ci.yml</code> runs on every push to <code>main</code> or
+<code>development</code>:</p>
+<pre><code>jobs:
+  test:
+    services:
+      db: postgres:16 + healthcheck        # a real database next to the test VM
+    steps:
+      - checkout, set up Python 3.12, pip install
+      - flask db upgrade                    # prove the migration chain applies cleanly
+      - flask db check                      # prove models haven't drifted from migrations
+      - pytest -q                           # the 121 tests
+
+  deploy:
+    needs: test                             # ← the gate
+    if: push to main
+    steps:
+      - ssh into the droplet:  git pull --ff-only
+                               docker compose -f docker-compose.prod.yml up -d --build
+</code></pre>
+<p>The deploy job is the <abbr title="Continuous Deployment — automatically releasing builds that pass the tests">CD</abbr> half: a push to <code>main</code> reaches production only if the full
+suite passed, the droplet rebuilds the image and swaps only the app container (data and <abbr title="Transport Layer Security — the encryption in HTTPS (successor to SSL)">TLS</abbr>
+certificates untouched), and the entrypoint applies any new migrations before serving. Day-to-day
+work happens on <code>development</code>; merging to <code>main</code> <em>is</em> the release
+action.</p>
+<div class="dotnet">≈ Azure DevOps: build stage with a service container, then a
+release stage gated on it, deploying over <abbr title="Secure Shell — encrypted remote terminal access to a server">SSH</abbr> instead of an agent. <code>needs: test</code> is
+the stage dependency; the <code>if:</code> is the branch filter on the release trigger.</div>
+
+<h2>Production security posture (say it before they ask)</h2>
+<ul>
+  <li>Database and app server publish <strong>no ports</strong>; only Caddy faces the internet, <abbr title="Transport Layer Security — the encryption in HTTPS (successor to SSL)">TLS</abbr>-only.</li>
+  <li>Secrets live in a gitignored <code>.env</code> on the droplet; <code>.env.example</code> documents every variable; production refuses to boot on a missing <code>SECRET_KEY</code>.</li>
+  <li>Session cookies are HttpOnly + Secure; passwords hashed (werkzeug); login is timing-equalized so username existence can't be probed.</li>
+  <li>Containers run as a non-root user.</li>
+  <li><strong>Known accepted gaps, on purpose and documented in the README</strong>: no <abbr title="Cross-Site Request Forgery — an attack where another site triggers requests using your logged-in cookie">CSRF</abbr> tokens, no rate limiting, no backups — right-sized for a demo, and naming them is part of the demo.</li>
+</ul>
+
+<div class="talk">
+Closing narrative, tying the whole walkthrough together: <em>"Twelve requirement docs with acceptance
+criteria → a phased build along the dependency graph → every phase gated by tests that run
+against the real database → <abbr title="Continuous Integration — automatically building and testing every push">CI</abbr> that refuses drift between models and migrations → <abbr title="Continuous Deployment — automatically releasing builds that pass the tests">CD</abbr> that
+refuses to deploy a red build → a prod stack where the only thing reachable from the internet
+is the <abbr title="Transport Layer Security — the encryption in HTTPS (successor to SSL)">TLS</abbr> proxy. Each piece is small, but they interlock — and I can walk you through any file
+in the repo and say why it's there."</em> That last clause is what this tutorial was for.
+</div>
+
+<div class="pager">
+  <a href="06-frontend.html">← 6. <abbr title="HyperText Markup Language">HTML</abbr> &amp; JavaScript</a>
+  <a href="08-backups.html">8. Backups &amp; audit →</a>
+</div>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,148 @@
+/* tutorial.css — shared stylesheet for the Shopfloor ERP walkthrough pages.
+   Dark theme. */
+
+* { box-sizing: border-box; }
+
+/* Tells the browser this page is dark, so native UI it draws itself —
+   scrollbars, text-selection defaults — matches instead of glaring white. */
+:root { color-scheme: dark; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #d6dbe4;
+  background: #14181f;
+}
+
+/* --- Header / navigation (identical on every page) ----------------------- */
+.site-header {
+  background: #0d1117;
+  color: #fff;
+  padding: 0.9rem 1.5rem 0;
+  border-bottom: 1px solid #262d38;
+}
+.site-header .brand {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.6rem;
+  color: #e8ecf3;
+}
+.site-header nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.site-header nav a {
+  color: #94a3b8;
+  text-decoration: none;
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px 6px 0 0;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.site-header nav a:hover { background: #1c2430; color: #e8ecf3; }
+.site-header nav a[aria-current="page"] {
+  background: #14181f;
+  color: #e8ecf3;
+  font-weight: 600;
+  box-shadow: 0 1px 0 #14181f; /* cover the header's bottom border under the active tab */
+}
+
+/* --- Page body ------------------------------------------------------------ */
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+h1 { font-size: 1.7rem; margin: 0 0 0.3rem; color: #f0f3f8; }
+h2 { font-size: 1.25rem; margin-top: 2.2rem; border-bottom: 2px solid #2c3440; padding-bottom: 0.25rem; color: #e8ecf3; }
+h3 { font-size: 1.05rem; margin-top: 1.6rem; color: #e8ecf3; }
+.subtitle { color: #8b96a8; margin-top: 0; }
+
+a { color: #6ab0f3; }
+a:visited { color: #9d8cf0; }
+
+strong { color: #f0f3f8; }
+
+/* Acronyms: <abbr title="..."> gives a native browser tooltip on hover —
+   no JavaScript needed. Subtle dotted underline marks the hoverable terms. */
+abbr[title] {
+  text-decoration: underline dotted #5f6b7d;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+/* --- Code blocks ------------------------------------------------------------ */
+pre {
+  background: #1b212c;
+  color: #e6e9f0;
+  border: 1px solid #2a3140;
+  padding: 0.9rem 1.1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+code {
+  font-family: Consolas, "Cascadia Code", Menlo, monospace;
+}
+p code, li code, td code, h2 code, h3 code {
+  background: #262d3a;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.85em;
+  color: #dfe4ee;
+}
+.code-label {
+  display: block;
+  font-size: 0.78rem;
+  color: #8b96a8;
+  margin-bottom: -0.4rem;
+  margin-top: 1rem;
+  font-family: Consolas, monospace;
+}
+
+/* --- Callout boxes ---------------------------------------------------------- */
+.dotnet, .warn, .talk {
+  border-left: 4px solid;
+  border-radius: 0 8px 8px 0;
+  padding: 0.75rem 1rem;
+  margin: 1.2rem 0;
+}
+.dotnet { background: #182335; border-color: #4d7cc0; }
+.dotnet::before { content: "Coming from .NET"; display: block; font-weight: 700; font-size: 0.8rem; color: #7fb0e8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+.warn { background: #2b2213; border-color: #c98a3a; }
+.warn::before { content: "Gotcha"; display: block; font-weight: 700; font-size: 0.8rem; color: #e0a95e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+.talk { background: #16281c; border-color: #4d8f62; }
+.talk::before { content: "Interview talking point"; display: block; font-weight: 700; font-size: 0.8rem; color: #7cc492; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+
+/* --- Tables ------------------------------------------------------------------ */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+  background: #191f29;
+}
+th, td {
+  border: 1px solid #2c3440;
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #232b38; color: #e8ecf3; }
+.table-scroll { overflow-x: auto; }
+
+/* --- Prev / next footer -------------------------------------------------------- */
+.pager {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 2px solid #2c3440;
+  font-size: 0.95rem;
+}
+.pager a { text-decoration: none; font-weight: 600; }
